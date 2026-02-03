@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+
+# Mac
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Experiments & Data
+data/
+!data/.keep
+# But keep the structure info if needed, but usually we ignore data.
+# Let's ignore bulk data but keep the directories if possible (using .gitkeep pattern usually, but I'll just ignore contents)
+
+# Ignore all contents of data except if we explicitly tracked something (which we haven't)
+# Actually, let's be specific to avoid ignoring everything accidentally.
+data/cad_exports/
+data/comsol_results/
+data/lhs_batches/
+data/surrogate_models/
+data/campaigns/
+
+# Admin docs handled manually, but ignore temp officce files
+~$*
+
+# Agent
+.agent/
