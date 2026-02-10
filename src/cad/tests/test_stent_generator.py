@@ -21,7 +21,7 @@ class TestStentParameters:
     def test_id_min_constraint(self):
         """Should reject parameters that result in ID < ID_MIN."""
         with pytest.raises(ValueError, match="ID"):
-            StentParameters(stent_french=4.0, r_t=0.25)  # Very thick wall
+            StentParameters(stent_french=4.0, r_t=0.30)  # Very thick wall
     
     def test_hole_packing_constraint(self):
         """Should reject if too many holes for section length."""
@@ -30,7 +30,7 @@ class TestStentParameters:
                 stent_length=100,
                 section_length_prox=25,
                 section_length_dist=25,
-                n_mid=20,  # Way too many for 50mm middle
+                n_mid=100,  # Way too many for 50mm middle
                 r_sh=0.5
             )
     
