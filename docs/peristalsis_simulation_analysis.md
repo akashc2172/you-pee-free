@@ -48,26 +48,93 @@ Three sources provide parameter values. Where they disagree, I note the recommen
 > The simulation couples a traveling pressure wave (peristalsis) with a transient pressure spike (cough) acting on a standard pediatric stent geometry.
 
 ### A. The Geometry System
-The domain consists of a **pigtail stent** (blue) sitting inside a **deformable ureter** (gray walls).
-- **Inlet (Kidney)**: 100 Pa baseline pressure.
-- **Outlet (Bladder)**: 0 Pa baseline, spiking to 10 kPa during cough.
-- **Wall**: Moving mesh (ALE) driven by the peristaltic function.
+The domain consists of a **pigtail stent** sitting inside a **deformable ureter**.
 
-![Geometry Schematic](/Users/akashc/masters/docs/images/geometry_schematic.png)
+```
+                    KIDNEY (Inlet: P = 100 Pa)
+                    ┌─────────────────────┐
+                    │    ╭──── Pigtail ────╮   │
+                    │    │   Coil (r=5mm)  │   │
+     Ureter Wall    │    ╰────────────────╯   │    Ureter Wall
+    (Arruda-Boyce)  │                          │   (Arruda-Boyce)
+    ┃               │    ┃  Stent Body   ┃    │              ┃
+    ┃  ← 1.5mm →    │    ┃  OD = 1.57mm  ┃    │  ← 1.5mm →  ┃
+    ┃   wall         │    ┃  (4.7 Fr)     ┃    │   wall       ┃
+    ┃               │    ┃    ○ side hole  ┃    │              ┃
+    ┃               │    ┃               ┃    │              ┃
+    ┃   ID = 3.2mm  │    ┃    ○ side hole  ┃    │              ┃
+    ┃  ←──────────→ │    ┃               ┃    │              ┃
+    ┃               │    ┃    ○ side hole  ┃    │              ┃
+    ┃               │    ┃               ┃    │              ┃
+    ┃               │    ┃    ○ side hole  ┃    │              ┃
+    ┃               │    ╭────────────────╮   │              ┃
+                    │    │   Pigtail Coil  │   │
+                    │    ╰────────────────╯   │
+                    └─────────────────────┘
+                    BLADDER (Outlet: P = 0 Pa)
+                    ⚠ Cough spike → 10 kPa!
+```
+
+**Key dimensions** (5-year-old):
+- Ureter length: **12–18 cm** (sweep)
+- Inner diameter: **3.2 ± 0.3 mm**
+- Wall thickness: **~1.5 mm** (Robben 1999)
+- Stent OD: **4.7 Fr** (1.57 mm) — fits inside the lumen with annular gap
 
 ### B. The Peristaltic Wave (`flc2hs`)
-This is the "squeezing" function. We use a smoothed Heaviside step to avoid crashing the solver.
-- **Shape**: A 5 cm long bolus of high pressure (3.5 kPa) traveling at 2.5 cm/s.
-- **Visual**: The blue region pushes urine (and the stent) downwards.
+This is the "squeezing" function. A smoothed Heaviside "top-hat" pulse travels down the ureter.
 
-![Peristaltic Wave](/Users/akashc/masters/docs/images/peristalsis_wave.png)
+```
+  Pressure
+  (Pa)
+  3500 ┤          ┌──────────────────┐
+       │         ╱                    ╲         ← Peak: 3.5 kPa (normal)
+  3000 ┤        ╱                      ╲            or 6.0 kPa (spasm)
+       │       ╱                        ╲
+  2000 ┤      ╱                          ╲
+       │     ╱                            ╲
+  1000 ┤    ╱                              ╲
+       │   ╱                                ╲
+     0 ┤──╱──────────────────────────────────╲──────────────
+       └──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──→ z (cm)
+          0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
+
+                    ├── 5 cm wave ──┤
+                    ─────────────────→ traveling at 2.5 cm/s
+```
+
+**COMSOL expression:**
+```
+P_wave(z,t) = P0 * ( flc2hs(z - (z0 + v*t), d) - flc2hs(z - (z0 + v*t) - Lw, d) )
+```
+- `P0` = 3500 Pa,  `v` = 0.025 m/s,  `Lw` = 0.05 m,  `d` = 0.003 m
 
 ### C. The "Water Hammer" (Cough Impulse)
-This is the "failure mode". A sudden cough sends a shockwave up the stent.
-- **Shape**: A 100 ms Gaussian spike reaching 10 kPa (dangerous reflux).
-- **Goal**: The stent must resist this backflow.
+This is the **critical failure mode**. A cough spike sends a pressure shockwave retrograde up the stent.
 
-![Cough Impulse](/Users/akashc/masters/docs/images/cough_impulse.png)
+```
+  Pressure
+  (kPa)
+    10 ┤          ╱╲
+       │         ╱  ╲         ← Peak: 10 kPa in ~100 ms
+     8 ┤        ╱    ╲            (= 100 cmH₂O!)
+       │       ╱      ╲
+     6 ┤      ╱        ╲
+       │     ╱          ╲
+     4 ┤    ╱            ╲       ⚠ This drives REFLUX
+       │   ╱              ╲        through the stent
+     2 ┤  ╱                ╲       back to the kidney
+       │ ╱                  ╲
+     0 ┤╱────────────────────╲─────────────────────────
+       └──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──→ t (s)
+        0.0  0.05 0.1 0.15 0.2 0.25 0.3 0.35 0.4 0.5
+```
+
+**COMSOL expression:**
+```
+P_cough(t) = P_peak * exp(-((t - t0)^2) / (2*sigma^2))
+```
+- `P_peak` = 10000 Pa,  `t0` = 0.2 s,  `sigma` = 0.05 s
 
 ### D. The Simulation Loop
 ```mermaid
