@@ -1,0 +1,984 @@
+
+
+=== PAGE 1 ===
+A biomechanical simulation of ureteral ﬂow during peristalsis using
+intraluminal morphometric data
+Bahman Vahidi, Nasser Fatouraee n
+Biological Fluid Mechanics Research Laboratory, Department of Biomedical Engineering, Amirkabir University of Technology (Tehran Polytechnic) , Haafez Avenue,
+Tehran 15914, Iran
+article info
+Article history:
+Received 16 June 2011
+Received in revised form
+13 December 2011
+Accepted 19 December 2011
+Available online 29 December 2011
+Keywords:
+Peristalsis
+Reﬂux
+Urine bolus
+Urodynamics
+Bioﬂuids
+abstract
+Reﬂux nephropathy and vesicoureteral reﬂux are two of the most important abnormalities in the upper
+urinary system in which toxins and bacteria from the bladder infect the ureter and the kidney and
+initiate renal scar formation. A quantitative analysis that characterizes urine ﬂow will further help our
+understanding of the ureter and also assist in the design of ﬂow aided devices such as valves and stents
+to correct reﬂux situations. Here, A numerical simulation with ﬂuid–structure interactions (FSI) using
+arbitrary Lagrangian–Eulerian (ALE) formulation and adaptive mesh procedure was introduced and
+solved to perform ureteral ﬂow analysis. Incompressible Navier–Stokes equations were utilized as the
+governing equations of ﬂuid domain. Ureteral in-vivo morphometric data during peristalsis were used
+to construct the presented model. A nonlinear material model was used to exhibit ureteral wall
+mechanical properties. Direct coupling method was used to solve the solid, ﬂuid and interface
+equations simultaneously. Results showed that recirculation regions formed against the jet ﬂow,
+neighboring the bolus peak. Through wave propagation, separation occurred behind the moving bolus
+on the wall and ureteropelvic reﬂux began from that location and extended upstream to the ureteral
+inlet. The maximum luminal pressure consistently occurred behind the urine bolus during peristalsis.
+The measured magnitude of maximum volumetric ﬂow rate resulted from isolated bolus transportation
+was 0.92 ml/min. In conclusion; due to presence of ﬂuid inertial forces during peristalsis, the function
+of ureteropelvic junction in prevention of reﬂux is signiﬁcant, especially at the beginning of peristaltic
+wave propagation. Moreover, modeling of ureteral function using imaging data will be valuable and it
+may help physicians to diagnose and cure the abnormalities.
+& 2011 Elsevier Ltd. All rights reserved.
+1. Introduction
+Under customary ﬂow conditions, the ureter transports urine
+in isolated boluses ( Mastrict and Tauecchio, 1984 ). Each one bolus
+of urine is pushed by a cell to cell moving contraction of the
+ureteral compliant wall. The mechanism of ureteral peristalsis has
+been a major topic for investigation from the early beginnings
+of peristaltic research ( Fung, 1971 ). Numerical analysis of the
+peristaltic ﬂow in the ureter attempts to advance our knowledge
+of the reﬂux phenomenon and other ureteral abnormalities. From
+a clinical point of view, vesicoureteral reﬂux and reﬂux nephro-
+pathy are two major abnormalities in the upper urinary tract.
+Reﬂux nephropathy usually happens in cases of pyelorenal back-
+ﬂow with infected urine. Bacteria rise from the bladder to the
+kidney, and maximal bladder pressures and different probable
+conditions of peristalsis in the ureter inﬂuence it ( Jorgensen,
+1986). Renal scar formation is a common result of reﬂux
+nephropathy. Moreover, reﬂux may infect and hurt kidney func-
+tion ( Bykova and Regirer, 1999 ) thus resulting in dialysis or in
+critical cases kidney transplantation ( Eccles, 1998 ).
+Relevant investigations performed in the ﬁeld of biomedicine up
+till now have been restricted to (1) Urine volume transported via
+peristalsis, (2) Propagation rate of peristaltic wave (Saeki et al., 1985),
+(3) Morphometry of the ureter ( Zelenko et al., 2004 ), (4) Dynamic
+changes of ureteral lumen during peristalsis ( Woodburne and
+Lapides, 1972), (5) Response of the ureteral muscular tissue to
+drugs (Kontani et al., 1993 ; Mahoney et al., 2006 ), and (6) Various
+ﬂow patterns taking place in the ureter of different mammalians
+(Ohlson, 1989a,b; Fung, 1993). Studies in the ﬁeld of biomechanics
+have been concentrated on understanding the mechanical properties
+of the ureteral wall ( Hansen and Gregersen, 1999 ; Yin and Fung,
+1971) and mathematical analyses of peristaltic ﬂow in the urinary
+system (Grifﬁths and Notschaele, 1983; Gintz et al., 2001; Vogel et al.,
+2004; Vahidi and Fatouraee, 2007 ; Jime´nez-Lozano, 2009; Vahidi
+et al., 2011).
+We formerly simulated a two-dimensional ureteral peristaltic
+activity that assumed a solid wall moving along the longitudinal
+direction between two rigid plates, ( Vahidi and Fatouraee, 2007 ).
+Contents lists available at SciVerse ScienceDirect
+journal homepage: www.elsevier.com/locate/yjtbi
+Journal of Theoretical Biology
+0022-5193/$ - see front matter & 2011 Elsevier Ltd. All rights reserved.
+doi:10.1016/j.jtbi.2011.12.019
+n Corresponding author. Tel.: þ98 2164542368; fax: þ98 21 666468186.
+E-mail address: Nasser@aut.ac.ir (N. Fatouraee).
+Journal of Theoretical Biology 298 (2012) 42–50
+
+=== PAGE 2 ===
+The principal limitation of that study was that the cell to cell
+stimulation of the ureteral wall during peristalsis, which takes
+place under physiological conditions of ureteral peristalsis, was
+not considered. We also presented an axisymmetric model using
+ureteral real data removing this shortcoming ( Vahidi et al., 2011 ).
+There, we investigated the effects of different mechanical para-
+meters on ureteral ﬂow. However, the open-tube regime of ﬂow
+in the ureter during peristalsis were simulated alone and the
+lower ﬂow rate regime of isolated bolus transportation in the
+ureter was not considered which occurs most commonly through
+peristalsis in real physiological conditions of human ureter
+(Ohlson, 1989b ). Therefore, in order to analyze this ﬂow regime,
+an axisymmetric nonlinear FSI model is constructed using real
+ureteral data of nonlinear wall mechanical properties, peristaltic
+wave velocity and ureteral luminal morphometric data during
+peristalsis. The present study is carried out to understand more
+precisely this transport mechanism compared to the recent
+previous studies (e.g., Gintz et al., 2001 ; Vogel et al., 2004 ;
+Jime´ nez-Lozano, 2009 ) that is performed through computational
+approaches using ﬂuid–structure interactions method.
+In this paper, we intend to investigate ureteral peristaltic
+activity, taking into consideration ureteral wall compliance and
+its cell to cell stimulation, in order to study urine ﬂow and
+pressure during peristalsis and detect temporal incidence of
+reﬂux phenomenon.
+2. Materials and methods
+2.1. Geometry of the numerical model
+The main goal of this study is to construct a mathematical model
+which aims to mechanically simulate the sophisticated nature of
+ureteral peristalsis. In order to do that, in-vivo morphometric data of
+ureteral lumen during peristalsis ( Woodburne and Lapides, 1972 )
+were utilized. Geometry of the presented numerical model is shown
+in Fig. 1 . This model illustrates the initial condition of the ureter
+before initiation of wall stimulation. The whole length of an adult
+ureter is about 30 cm that was as sumed in the presented model
+(Fig. 1 (a)) and each urine bolus ranges from 3 to 12 cm in length
+(Jime´ nez-Lozano, 2009). The initial bolus of urine collected at the
+proximal portion of the ureter with the length of 6 cm can be seen in
+Fig. 1(b). The proportion between luminal areas at the positions of
+bolus peak and ureteral collapsed regions could simply be calculated
+by dividing the two areas shown in Fig. 1(b).
+2.2. Governing equations
+The governing equations for the solid domain are the Momen-
+tum and Equilibrium equations; i.e., Newton’s laws of mechanics
+(Fung, 1996 ):
+rai/C0 sij,j/C0 rf i ¼ 0i n sXðtÞð 1Þ
+sijnj/C0 ti ¼ 0o n sC ðtÞð 2Þ
+where a i is acceleration of a material point, f i is force per unit
+mass, sXðtÞ is the structural domain at time t,t i is surface traction
+vector, sij is stress, n j the unit normal vector that points outwards
+from the domain sX, sCðtÞ is the solid boundary at time t.
+The governing equations used for the ﬂuid domain are the
+Navier–Stokes and Continuity equations. In Eulerian type, they are
+r!: V! ¼ 0, ð3Þ
+rf
+@ V!
+@t þ V!: r! V!
+ !
+þ r!p ¼ mr2 V!þ F!
+b, ð4Þ
+where V! ¼ð vy,vzÞ symbolizes the ﬂow velocity vector, rf is the
+ﬂuid density, p is the static pressure, m is the dynamic viscosity,
+and F!
+b represents the body force.
+Because the ﬂuid domain has moving boundaries, an arbitrary
+Lagrangian–Eulerian (ALE) formulation is employed for the ana-
+lysis of the ﬂuid ﬂow ( Bathe et al., 1995 , 1997; Bathe and Kamm,
+1999). As the ﬂuid domain deforms, additional terms in the
+governing equations of the ﬂuid (the Navier–Stokes equations of
+conservation of momentum and the continuity equation of con-
+servation of mass) are engendered which substitute the convec-
+tive velocity with the relative velocity; this forms the arbitrary
+Langrangian–Eulerian formulation. In other words, the ALE for-
+mulation of the ﬂuid domain can be directly coupled with the
+Lagrangian formulation of the solid domain. In this formulation,
+the material derivative for all the solution variables is provided by
+Bathe et al. (1999) as follows
+Dð:Þ
+Dt ¼ @ð:Þ
+@t þð V!/C0 W/C131!Þ: r!ð:Þ, ð5Þ
+where @(.)/@t is the transient term at the regarded mesh position,
+W/C131! represents the corresponding mesh velocity, and V! is the
+actual ﬂuid particle velocity. Regarding Eqs. (5) and (4), we have
+rf
+@ V!
+@t þð V!/C0 W/C131!Þ: r! V!
+ !
+þ r!p ¼ mr2 V!þ F!
+b, ð6Þ
+Applying no-slip boundary conditions at the wall, the coupling
+conditions at the ﬂuid–structure interface are
+@ðdf
+i Þ
+@t ¼ @ðds
+i Þ
+@t ð7Þ
+where df
+i and ds
+i are the ﬂuid and solid displacements, respec-
+tively. The no-slip condition imposes that no slipping conditions
+between urine and the ureteral wall were allowed. Traction
+equilibrium along the ﬂuid–structure interfaces can be written
+as below
+njsf
+ij ¼ njss
+ij ð8Þ
+where sf
+ij and ss
+ij are, respectively, the ﬂuid and solid stresses. n is
+the unit vector normal to the interface of the ﬂuid and solid
+domains.
+2.3. Material models
+2.3.1. Ureteral wall model
+The ureteral wall is highly compliant and therefore any
+convenient model should consider this characteristic. Nonlinear
+hyperelastic material models seem to be suitable for our purpose.
+Here, the Arruda–Boyce model was utilized for the ureteral wall.
+In this model, which is a non-Gaussian eight-chain molecular
+network model, chains are located along the diagonals of the unit
+cell and deform with the cell. From a practical point of view, the
+ﬁfth order approximation of the The strain energy density func-
+tion of the Arruda–Boyce model is precise enough ( Arruda and
+Boyce, 1993 ) as below
+w8ch ¼ m
+X5
+i ¼ 1
+Ci
+l2i/C0 2
+m
+ðIi
+1/C0 3Þ
+"#
+: ð9Þ
+with C1 ¼0.5, C2 ¼0.05, C3 ¼0.01047, C4 ¼ 0.00269, C5 ¼0.00077.
+where m is the initial shear modulus and lm is the locking stretch.
+This model is well suited for rubber materials with strain up to
+300% ( Arruda and Boyce, 1993 ). As a boundary condition in the
+solid model, the ureteral wall was immobilized at both ends.
+B. Vahidi, N. Fatouraee / Journal of Theoretical Biology 298 (2012) 42–50 43
+
+=== PAGE 3 ===
+2.3.2. Urine model
+Transient ﬂow of urine in an axisymmetric model of ureter
+was assumed. The ﬂuid ﬂow was assumed to be laminar,
+Newtonian, viscous and incompressible with Density ( r) and
+viscosity ( m0) of 1000 kg/m 3 and 1.3 cP ( Bykova and Regirer,
+2005), respectively. At the ureteral inlet, normal traction of
+100 Pa was imposed that is in the range of the constant pressure
+level in the ureter ( Jime´ nez-Lozano, 2009). Continuity equation of
+conservation of mass (Eq. (3)) and the incompressible Navier–
+Stokes equations (Eq. (4)) were used as the governing equations
+for the ﬂuid.
+2.4. Contact analysis
+Wall stimulation of the ureter was performed using a rigid
+contact surface as it is shown in Fig. 1 &. The rigid contact surface
+is initially in contact with the ureteral wall and after elapsing
+some time steps of transient analysis (that results in a steady ﬂow
+between ureteral inlet and outlet due to the applied pressure
+difference) at t¼1 s, this rigid contact surface moves in the
+longitudinal direction with an average physiological velocity of
+ureteral peristalsis of 2 cm/s. This velocity magnitude was utilized
+in our simulation because the range of physiological velocity of
+peristalsis is reported to vary from 2 to 6 cm/s ( Jime´ nez-Lozano,
+2009). The peristalsis time was assumed 15 s in our study because
+it takes 15 s for the peristaltic wave to cover whole length of the
+ureter (30 cm) with the constant velocity of 2 cm/s. To model the
+interaction of boundary of rigid surface and the ureteral outer
+wall, contact condition was setup between the moving rigid
+surface and outer boundary of the ureteral wall. Frictionless
+contact analysis was performed between the rigid surface and
+the ureteral wall boundaries which is less costly to use comparing
+to frictional analysis if the contact surfaces are smooth. In our
+study, the constraint function method which is more effective
+than the segment method in most frictionless contact problems
+(Bathe, 2008a ) was used as the contact solution algorithm. Large
+contact displacement formulation was utilized. Penetrations
+between the rigid surface and the wall elements were not allowed
+by the contact algorithm. Once penetration was detected, the
+overlapping elements were returned to their positions at the
+previous time step. The rigid surface was meshed assuming linear
+contact segments including 2-node per segment. Tolerance for
+nodal coincidence checking for the rigid contact surface nodes
+was set to 10
+/C0 5.
+2.5. Solution methods
+Fluid–structure interactions (FSI) method was used to solve
+the computational problem. The adaptive mesh repair procedure
+dealing with coarsening and reﬁning of meshes was utilized in
+Luminal collapsed region
+Ureteral wall
+L = 300 mm
+Urine initial bolus
+Zoom
+R = 0.195489 mm
+R = 0.195489 mm
+LUrine initial bolus= 60 mm
+r = 0.798087 mm
+X
+Z
+t = 1 mm
+Rigid
+contact
+surface Direction of bolus movementSolid mesh
+Fluid mesh
+Symmetry line
+Y
+Fig. 1. Geometry and initial computational mesh for urine and ureteral wall. (a) Whole length model of ureter including initial urine bolus at the proximal pa rt of the
+ureter; (b) sizes of initial bolus based on Woodburne and Lapides (1972) . Luminal area of the ureter at the collapsed region (at the beginning of bolus) and at the peak of
+bolus region, can be seen from the ﬁgure; (c) the initial ﬁnite element mesh of urine and ureteral wall at the inlet of the model. The rigid contact surfac e which is initially in
+contact with ureteral wall, makes peristaltic stimulation in the ureteral longitudinal direction.
+B. Vahidi, N. Fatouraee / Journal of Theoretical Biology 298 (2012) 42–5044
+
+=== PAGE 4 ===
+the solution of the ﬂuid model. The method is originated in
+utilizing freeform meshing with 3-node triangular elements in
+2-D ﬂows. For the CFD mesh, the procedure implements the local
+criterion C to opt element sizes ( Bathe and Zhang, 2009 )
+CðFeÞ : hep:Fe: ¼ c ð10Þ
+where c is a constant, hep is the locally desirable element size to
+be speciﬁed, and Fe is a ﬂow-solution-variable throughout the
+element, such as the pressure gradient or vorticity. In Eq. (14) the
+L2 norm of the calculated variable is assumed. If the calculated
+solution is logically precise, and the number of preferable ele-
+ments is controlled by a ratio factor lr, we consider
+c ¼ lr
+1
+Ne
+X
+e
+he:Fe: ð11Þ
+where he is the local element size for the mesh that is to be
+modiﬁed, Ne is the total number of elements in that mesh, and it
+is summed over Ne.
+In the ﬁnite element model, elements of too large or too small
+sizes must be avoided, and consequently limits on sizes must be
+determined. This leads to the ﬁnal formula for the preferable local
+element size
+hep ¼ c
+maxfminf:Fe:,ðc=hminÞg,ðc=hmaxÞg ð12Þ
+where hmin and hmax are, respectively, the minimum and max-
+imum element sizes permitted in the mesh. Eqs. (15) and (16) are
+employed to create triangular elements with sides of (just about)
+equal lengths i.e., geometrically isotropic elements.
+Finally, the desirable element sizes may be smoothed a couple
+of times using the iteration procedure
+hk þ 1
+ep ¼
+P
+nbhehk
+epP
+nbhe
+k ¼ 1,2,... , ð13Þ
+where, as showed by subscript ‘‘ nb’’ the sum is performed over
+the neighboring elements. To attain the improved mesh, an
+algorithm is also employed to facilitate recovery of geometries
+independent of the element sizes. The recovery of geometry is
+rooted in spline interpolations applied for different portions of the
+whole geometry. The above element criteria chieﬂy re-scale
+element sizes to achieve a mesh in which the chosen gradients
+times the element sizes are approximately constant and the
+geometry and boundary conditions are appropriately represented.
+In fact, the model size must be restricted, that is to say, it is
+required to consider an upper boundary on the maximum number
+of elements permitted. When the overall number of desirable
+elements Nep is bigger than the maximum number of elements
+permitted Nmax, the geometric size of all elements can be
+enhanced by a factor l, i.e., hep is change to lhep, with
+l ¼ max Nep
+Nmax
+/C18/C19 1=s
+,1
+()
+ð14Þ
+where s is the space dimension and
+Nep ¼
+X
+e
+Ve
+Vep
+ð15Þ
+where Ve is the current element volume and Vep is the volume of
+the elements calculated using the desirable element size ( Bathe
+and Zhang, 2009 ).
+Subsequent to discretization of the ﬂuid and solid equations,
+the algebraic system has the following type ( Zhang and Bathe,
+2001; Bathe and Zhang, 2004 )
+FðXÞ¼
+Ff ðXf ,XsÞ
+FsðXf ,XsÞ
+"#
+¼ 0 ð16Þ
+where Xf and Xs are, respectively, the ﬂuid and solid nodal
+solution variables and Ff, Fs represent the ﬁnite element equations
+of the ﬂuid and solid domains, respectively ( Bathe and Zhang,
+2004).
+At each time step, a direct coupling method of ﬂuid–structure
+interaction (FSI) was utilized to solve the solid, ﬂuid and interface
+equations simultaneously which keep away from the potential
+convergence problems allied with iterated solution of ﬁrst the
+solid subsequently the ﬂuid problem (however, this solution
+method needs adequate computer memory to handle the large
+sparse matrices that must be inverted).
+In the direct coupling method, by using the Newton–Raphson
+method at iteration k, equations are converted into linearized
+equations as ( Bathe, 2008b )
+Aff Afs
+Asf Ass
+"# DXk
+f
+DXk
+s
+2
+4
+3
+5 ¼
+/C0 Fk
+f ðXf ,XsÞ
+/C0 Fk
+s ðXf ,XsÞ
+2
+4
+3
+5, ð17Þ
+DXk ¼ Xk þ 1/C0 Xk ð18Þ
+Fk
+f /C17 Ff ½Xk
+f ,lddk
+s þð 1/C0 ldÞdk/C0 1
+s /C138ð 19Þ
+Fk
+s /C17 Fs½Xk
+s ,ltsk
+f þð 1/C0 ltÞsk/C0 1
+f /C138ð 20Þ
+where Aff and Ass are the ﬂuid Jacobian matrix and solid Jacobian
+matrix, respectively, and Afs and Asf are the coupling Jacobian
+matrices. These Jacobian matrices are calculated as ( Bathe and
+Zhang, 2004 )
+Aff ¼
+@Fk
+f
+@Xf
+, Afs ¼
+@Fk
+f
+@Xs
+,
+Asf ¼ @Fk
+s
+@Xf
+, Ass ¼ @Fk
+s
+@Xs
+: ð21Þ
+In the direct coupling method which was used in the pre-
+sented solution, ﬂuid stress and solid displacement have also
+been relaxed, the same as in the iterative coupling method, using
+a stress relaxation factor lt and a displacement relaxation factor
+ld, respectively. These factors have been proven helpful for many
+difﬁcult problems ( Bathe, 2008b). Stress and displacement relaxa-
+tion factors were assumed 0.9 and 1, respectively.
+Solution process is in a way that the linearized system is
+solved at each iteration k and the succeeding solutions for the
+solid and ﬂuid are updated. Stress or displacement Residuals are
+subsequently calculated and compared against speciﬁed toler-
+ances. If the solutions have not yet converged, the procedure
+iterates to k þ1 and repeats the referred linearization route. When
+the solutions have converged, the method continues to the next
+time step. In brief, four common computational steps exist in the
+direct coupling method utilized; ﬁrstly, to assemble the solid and
+ﬂuid equations independently into a distinct ﬂuid and distinct
+solid model; secondly, to assemble the solid matrix, ﬂuid matrix,
+and the coupling matrices into one coupled matrix system;
+thirdly, to solve the linearized equation of the coupled system
+and to bring up to date the solution; and lastly, to calculate and
+compare the residuals with the determined tolerance. In case the
+solution diverged, the process was restarted from the initial step
+(Zhang and Bathe, 2001 ; Bathe and Zhang, 2004 ).
+The model was solved numerically using the commercial
+package ADINA-FSI (Adina R&D Inc., Watertown MA, USA). 10
+time steps with the magnitude of 0.1 s were considered for the
+non-peristaltic phase, before beginning of wall stimulation. Dur-
+ing this period of time, a steady ﬂow occurred in the ureter due to
+the applied pressure difference between its inlet and outlet. We
+assumed 1500 time steps with the magnitude of 0.01 s during
+peristalsis.
+B. Vahidi, N. Fatouraee / Journal of Theoretical Biology 298 (2012) 42–50 45
+
+=== PAGE 5 ===
+Mesh convergence analysis examining ﬂow parameters and
+stress/displacement with coarser and ﬁner meshes were checked
+that the numerical results are independent of mesh density. After
+analysis of mesh size independence of solution, ﬂuid domain was
+meshed with 40,000 triangular 2-D Fluid Axisymmetric type
+elements which contain 3-nodes. 3000 Quadrilateral 2-D Solid
+Axisymmetric type elements having 9-nodes were used for the
+solid domain. The initial mesh of the ﬂuid and structure at the
+ureteral inlet is shown in Fig. 1(c). The ﬂuid and the structure cells
+were all deﬁned as axisymmetric, so that they supposedly
+extended circumferentially by one radian. Although the imple-
+mented FSI procedure does not require that the ﬂuid grid match
+the structure grid, this arrangement guaranteed that ﬂuid cells
+remained adjoining with structure cells in the direction of the
+straight lines between nodes at the ﬂuid/structure interaction
+boundaries. To preserve the contiguity of the combined mesh,
+ﬂuid–structure interaction boundaries were determined in both
+the solid and ﬂuid domains.
+3. Results
+Experimental data of ureteral wall properties from (Yin and Fung,
+1971) were ﬁtted by this material model as illustrated in Fig. 2.
+Urine pressure proﬁle at a point in peristalsis is shown in
+Fig. 3 . Analysis of urine pressure during peristalsis showed that
+the maximum pressure in the ureter during peristalsis consis-
+tently occurred behind the moving bolus which is much higher
+than the magnitude of initial constant pressure applied to the
+ureteral inlet.
+The results indicated that urine velocity is maximum inside
+the moving bolus, neighboring the centerline of the ureter which
+leads to a high velocity jet ﬂow there, as it can be seen in Fig. 4 a.
+Also, recirculation regions formed against the jet ﬂow, neighbor-
+ing the bolus peak. The urine velocity vector plot behind the
+moving bolus ( Fig. 4b) shows that there are consistent stagnation
+points from which urine retrogrades from the ureter into the
+kidney and persists up to the ureteral inlet ( Fig. 4 c). Urine ﬂow
+  0   1   2   3   4   5   6   7   8   9   10   11   12   13   14   15   16   17   18   19   20   21   22   23   24   25
+*10-2
+0
+5
+10
+15
+20
+25
+30
+Yin and Fung experimental data (1971)
+Arruda-Boyce material model
+Engineering strain
+Engineering stress (Pa) *102
+Fig. 2. Stress–strain relation of ureteral wall. Nonlinear Arruda–Boyce model was ﬁtted in ADINA precisely to the experimental data of Yin and Fung (1971) .
+Fig. 3. Urine pressure proﬁle near the moving bolus at a point in peristalsis.
+Fig. 4. Urine velocity vectors near the moving bolus in t¼3 s. (a) Velocity vectors inside the moving bolus. Recirculation regions near the peak of bolus can be seen;
+(b) velocity vectors behind the moving bolus. Reﬂux initiates from these areas and continues up to the ureteral inlet; (c) Velocity vectors at the uret eral inlet.
+B. Vahidi, N. Fatouraee / Journal of Theoretical Biology 298 (2012) 42–5046
+
+=== PAGE 6 ===
+rates at the ureteral inlet and outlet were calculated from the
+following equation:
+Q ¼ 2p
+Z R
+0
+rV r dr ð22Þ
+where Vr denotes the urine velocity in the radial direction ( Y-
+direction in the presented axisymmetric model). In order to
+detect reﬂux phenomenon at the ureteral inlet, urine velocity
+proﬁles were derived, as illustrated in Fig. 5 . Ureteropelvic reﬂux
+decreased as the wave moved away from the ureteral inlet and
+diminished when urine bolus approached the ureteral outlet. The
+magnitudes of urine ﬂow rate that stream backwards from the
+ureter into the kidney and form ureteropelvic reﬂux (during a
+short time after beginning of peristalsis that large amounts of
+reﬂux occurs), are shown in Fig. 6 . Uretrovesical reﬂux (reverse
+ﬂow from the bladder into the ureter) also occurred during the
+wave longitudinal propagation (see Fig. 7 (a)) which (with the
+maximum magnitude of 0.06 ml/min) was much lower in magni-
+tude than the rate of ureteropelvic reﬂux and diminished when
+the bolus approached the distal portion of the ureter. The physical
+reason causing ureterovesical reﬂux during peristalsis is the
+signiﬁcant magnitudes of pressure drop near the ureteral outlet
+caused by the onset of peristalsis that signiﬁcantly collapses the
+ureteral wall near the bladder. The pressure difference (adverse
+pressure gradient) between this region and the ureteral outlet
+results in ureterovesical reﬂux which disappears when urine
+isolated bolus approaches the ureteral outlet. The ureterove-
+sical reﬂux vanishes at the ending seconds of peristalsis, as
+-0.04
+-0.03
+-0.02
+-0.01
+0
+0.01
+-0.08
+-0.07
+-0.06
+-0.05
+0 0.00005 0.0001 0.00015 0.0002
+t=3s
+t=5s
+t=7s
+t=9s
+t=11s
+t=13s
+t=15s
+t=15.6s
+t=15.7s
+t=15.8s
+t=15.9s
+t=16s
+t=4s
+t=6s
+t=8s
+t=10s
+t=14s
+y = 4E + 13x4 - 9E + 09x3 + 2E + 06x2 + 55.618x - 0.0635
+y = 1E + 13x4 - 3E + 09x3 + 601948x2 + 3.2072x - 0.0158
+y = 3E + 12x4 - 5E + 08x3 + 121667x2 + 11.801x - 0.0077
+y = 9E + 12x4 - 3E + 08x3 + 346587x2 + 55.065x - 0.0355
+y = 6E + 12x4 - 2E + 09x3 + 349298x2 + 0.5337x - 0.009
+y = 2E + 12x4 - 3E + 08x3 + 72542x2 + 6.99x - 0.0046
+y = 1E + 12x4 - 2E + 08x3 + 47775x2 + 4.5674x - 0.003
+y = 4E + 11x4 + 7E + 07x3 + 6801.6x2 + 4.4049x - 0.0022
+y = -1E + 12x4 - 2E + 08x3 - 10097x2 - 10.291x + 0.0055
+y = -2E + 12x4 - 3E + 08x3 - 12260x2 - 14.988x + 0.0082
+y = -2E + 12x4 - 3E + 08x3 - 13078x2 - 14.764x + 0.0081
+y = -2E + 12x4 - 3E + 08x3 - 13181x2 - 15.058x + 0.0083
+y = -2E + 12x4 - 3E + 08x3 - 13201x2 - 15.015x + 0.0082
+y = -1E + 12x4 - 3E + 08x3 - 12789x2 - 14.145x + 0.0077
+y = -1E + 12x4 - 2E+08x3 - 11095x2 - 10.903x + 0.0058
+y = -5E + 11x4 - 1E + 08x3 - 6888.4x2 - 5.8287x + 0.003
+y = 2E + 11x4 + 5E + 07x3 + 3141.4x2 + 2.6387x - 0.0013
+Distance  from the axis (m)
+Velocity (m/s)
+t=3s
+t=4s
+t=5s
+t=6s
+t=7s
+t=8s
+t=11st=9s t=13st=10s
+t=14s
+t=15.7s
+t=15.8s
+t=15.9st=15s
+t=16s
+t=15.6s
+Fig. 5. Urine velocity proﬁle at the ureteral inlet during peristaltic wave propagation through the ureter.
+B. Vahidi, N. Fatouraee / Journal of Theoretical Biology 298 (2012) 42–50 47
+
+=== PAGE 7 ===
+demonstrated in Fig. 7 (b)–(d). This is due to the high positive
+pressure gradients occurring at the distal portions of the ureter
+resulting from the difference between the high pressure region
+behind the bolus and the constant pressure magnitude, initially
+applied at the ureteral outlet.
+The isolated urine bolus’ ﬂow rate was calculated during its
+drainage to the bladder and demonstrated in Table 1 . The results
+showed that the maximum and the average magnitudes of urine
+volumetric ﬂow rate were 0.917 ml/min and 0.565 ml/min,
+respectively, between t¼ 15 s and t¼15.8 s in which large
+amounts of an isolated urine bolus drains from the ureter into
+the bladder.
+4. Discussion
+In this study, a computational simulation was proposed to
+simulate ureteral peristalsis in which intraluminal geometrical
+dynamic changes of the ureter through the wave propagation is more
+realistic in comparison with previously published investigations (e.g.,
+Carew and Pedley, 1997; Gintz et al., 2001 ; Jime´nez-Lozano, 2009).
+Through this simulation, dynamic interactions between urine and the
+ureteral wall are explored. It is worth noting that the complicated
+nature of ureteral physiological muscular changes during peristalsis
+that occur in both circumferential and longitudinal directions were
+not considered here which need much more thoughtfulness and care.
+Grifﬁths et al. (1987) reported that peristalsis is not strictly
+periodic in the ureter. We used a ﬁnite length tube with
+constrained outlet condition and in order to make peristalsis, a
+moving contraction wave was implemented. These considerations
+removed the necessity for using simplifying assumptions such as
+sinusoidal contraction waves and periodic boundary conditions
+(as were assumed in the investigations of Lykoudis and Roos
+(1970), Manton (1975) , Shapiro et al. (1969) , Takabatake et al.
+(1988), Xiao and Damodaran (2002) , Yin and Fung (1969) , Zien
+and Ostrach (1970) ). Furthermore, it is important to note that
+time-varying shape of the tube walls during peristalsis which is a
+realistic assumption due to strict time dependency of the problem
+cannot be satisﬁed using periodicity since periodicity makes any
+peristaltic pumping shape invariant under translation ( Walker
+and Shelley, 2010 ). This issue is of more signiﬁcance when bolus
+reaches near the end of the ureter. Because during drainage of the
+bolus from the ureteral outlet, great temporal changes in bolus
+shape and pressure as well as outlet ﬂow rate occurs.
+-0.8
+-0.7
+-0.6
+-0.5
+-0.4
+-0.3
+-0.2
+-0.1
+0
+3 4.2 3.2 4.4 3.4 4.6 3.6 4.8 3.8 5 4
+Time (s)  
+Flow rate (ml/min)
+Fig. 6. Urine ﬂow rate at the ureteral inlet between t¼3 s and t¼5 s in which large
+amounts of ureteropelvic reﬂux occurs. The magnitudes brought in this ﬁgure,
+determine variations of quantity of ureteropelvic reﬂux. Peristalsis begins at t¼1s .TIME 8.5 s
+VELOCITY (m/s)
+TIME 15.0 s
+0.07000
+0.06000
+0.05000
+0.04000
+0.03000
+0.02000
+0.01000
+VELOCITY(m/s)
+TIME 15.5 s
+VELOCITY(m/s)
+TIME 16.0 s
+0.1750
+0.1500
+0.1250
+0.1000
+0.0750
+0.0500
+0.0250
+0.003900
+0.003300
+0.002700
+0.002100
+0.001500
+0.000900
+0.000300
+Direction of bolus movement
+Fig. 7. Urine velocity vectors at the ureteral outlet. (a) at the half time of peristaltic mechanism. Notice to the ureterovesical reﬂux; (b–d) at the ending t imes of ureteral
+peristaltis that urine bolus drains to the bladder.
+B. Vahidi, N. Fatouraee / Journal of Theoretical Biology 298 (2012) 42–5048
+
+=== PAGE 8 ===
+The entrance length for laminar ﬂow was reported by experi-
+mental and analytical observations to be ( Mazumdar, 1992 )
+Le ¼ 0:06D Re ð23Þ
+where D is pipe diameter, Le is ureteral entrance length and Re is
+Reynolds number of laminar ﬂow. In our simulation, the Reynolds
+number at the ureteral inlet is much lower than unity except in a
+short period of maximum reﬂux occurrence in which the max-
+imum Reynolds number is in the order of 10. During the solution
+experiencing forward inlet ﬂow considering a diameter of
+approximately 0.4 mm for ureteral inlet, it can be easily achieved
+from Eq. (23) that the entrance length is much smaller than
+the distance between two successive computational nodes in the
+longitudinal direction (300 mm length/4000-nodes). Therefore
+the entrance distance effect to the ﬂow ﬁeld is negligible.
+The foremost beneﬁt of this model is that ureteral wall non-
+linear properties as well as a precise geometry of ureteral luminal
+area during peristalsis have been considered together. Moreover,
+the cell to cell wall stimulation which occurs in the physiological
+conditions of ureteral peristaltic function was applied through an
+external barrier (The rigid contact surface shown in Fig. 1 ). This
+kind of stimulation results in time-varying shape of the moving
+bolus during peristalsis. Furthermore, one of the major advan-
+tages of the presented research is the assumed axisymmetric
+model compared to the related numerous 2-D models studied
+before ( Vahidi and Fatouraee, 2007 ; Teran et al., 2008 ; Jime´ nez-
+Lozano, 2009 ; Walker and Shelley, 2010 ). Since biological tubes
+have large nonlinearity in geometry and material properties, the
+inevitable effect of dimension in ﬁnite element models in any
+analysis is obvious. The model presented in this paper can be
+considered as a signiﬁcant step simulating 3-D problems and has
+many applications analyzing peristaltic ﬂow in collapsible tracts
+of different mammalian organs.
+Various ﬂow patterns in the ureter during peristalsis were
+reported that are isolated-bolus, boluses in contact, leaky-bolus
+and open-tube ﬂow ( Grifﬁths, 1987 , 1989; Ohlson, 1989a ,b). The
+model presented in this paper describes the condition in which
+the common peristaltic mechanism in human ureteral function
+(isolated bolus transportation) exists ( Ohlson, 1989b ).
+The urine pressure proﬁle achieved in the ureter during
+peristalsis in the presented numerical model ( Fig. 3 ) has a good
+agreement with Weinberg’s observations ( Weinberg, 1974 ). He
+reported that the maximum ureteral luminal pressure during
+peristalsis permanently occurs behind the moving bolus.
+The ﬂow rate results achieved in this study (with the max-
+imum and average ﬂow rates of 0.917 ml/min and 0.567 ml/min,
+respectively) as shown in Table 1 , are in accordance with the
+ﬁndings of previously published theoretical ( Grifﬁths, 1989 ) and
+clinical ( Ohlson, 1989b ) investigations. In particular, through
+urography of eight urinary systems (that were chosen for mor-
+phometry and subsequent volumetry), Ohlson (1989b) reported
+that volumetric ﬂow rate of a human isolated urine bolus would
+be between 0.265 ml/min and 2.45 ml/min. Furthermore, Grifﬁths
+(1989) reported that the corresponding ﬂow rate of isolated bolus
+(the intrinsic upper limit to the ﬂow rate that can be transported
+by steady peristalsis) is probably of order 2 ml/min. However, he
+also referred that there are physiologically high urine pressures
+and ﬂow rates which are possibly attained only occasionally and
+for short periods.
+The maximum magnitude of bolus ﬂow rate of the presented
+numerical model was slightly smaller than the maximum magni-
+tudes reported from previous studies referred above. This differ-
+ence may be due to the fact that the ureteropelvic valve
+mechanism in the ureter was ignored in the presented model,
+leading to the ureteropelvic reﬂux. The ignorance was done to
+quantify the anti-reﬂux effect of the physiological function of this
+valve. This gives us a worthwhile understanding of the function of
+this valve. The valve mechanism there is so that does not allow
+urine backﬂow to the kidney. In other words, the simple papillae
+which drain the single reniculus do not permit this backﬂow due
+to their convexity as well as the slit-like opening of the collecting
+ducts into the papillae ( Ransley and Risdon, 1975 ). Dysfunction of
+this mechanism may lead to reﬂux nephropathy that most often
+occurs in cases of pyelorenal backﬂow with infected urine
+(Jorgensen, 1986 ).
+The results marked a signiﬁcant role of ﬂuid–structure inter-
+action on ﬂow analysis within a uniform compliant tube experi-
+encing peristalsis. Similar to other engineering models that
+simulate a system as intricate as a living organism, we made
+several simpliﬁcations in our simulation. These simpliﬁcations
+were mainly in (1) geometry; in reality, the ureteral collapsed
+lumen is stellate in form ( Woodburne and Lapides, 1972 ;
+Jime´ nez-Lozano, 2009 ), (2) rate of peristalsis; the contraction
+wave velocity may vary during peristalsis through the ureter
+due to the controlling function of a pacemaker in the renal
+pelvis ( Constantinou, 1974 ; Zawalinski et al., 1975 ; Gosling and
+Constantinou, 1976) and (3) ureteral wall loading conditions; the
+conditions relate to the pre-stresses in the ureter that strengthens
+it to resist urine luminal forces ( Hansen and Gregersen, 1999 ). It
+is worth to note that the total stress (i.e., passive plus active)–
+strain curve from Yin and Fung (1971) was used to present the
+mechanical properties of the ureteral wall during peristalsis. In
+this work, a rigid moving contact surface applies an external load
+on the ureteral wall. This mechanical longitudinal stimulation
+makes the ureter collapsed in whole length, from behind of the
+moving bolus up to the ureteral inlet. Although this assumption
+simpliﬁes the ureteral wall properties from physiological point of
+view, it seems more appropriate than implementing the passive
+stress–strain curve due to referred characteristics of the wall
+stimulation in our study.
+As yet, there are numerous unanswered questions in this
+research ﬁeld that can be answered using the approach imple-
+mented in this study. For instance, the knotty nature of reﬂux and
+order of effects of different mechanical and biological parameters
+are not well understood. The direct interaction between the two
+components of the urinary system (kidney and bladder) has
+barely acknowledged any theoretical insight. In addition, the wall
+activation by a pacemaker that makes peristalsis and the detailed
+progression of the elastic deformation in the ureteral muscle
+which is highly nonlinear has not been completely understood.
+There exist some great difﬁculties in solving such complicated
+FSI problems due to the restrictions in computational tools and
+costs. We thereby hope that through developments in numerical
+methods as well as further studies about the sophisticated nature
+of ureteral valve’s non-return action, valve mechanisms of the
+ureteropelvic and ureterovesical junctions can be simulated and
+better understood through a 3-D analysis by the presented
+approach. The higher ﬂow rate mechanisms of leaky-bolus ﬂow
+Table 1
+Urine ﬂow rate at the ureteral outlet between t¼15 s and t¼15.8 s during drainage of urine bolus to the bladder.
+Time (s) 15 15.1 15.2 15.3 15.4 15.5 15.6 15.7 15.8
+Urine ﬂow rate (ml/min) 0.294 0.355 0.429 0.531 0.687 0.827 0.917 0.742 0.381
+Average ﬂow rate (ml/min) 0.565
+B. Vahidi, N. Fatouraee / Journal of Theoretical Biology 298 (2012) 42–50 49
+
+=== PAGE 9 ===
+and boluses in contact ﬂow are also important to be studied and
+can be simulated through this mathematical framework. As an
+ultimate goal of this research, patient-speciﬁc simulation of
+ureteral function based on geometric and ﬂow/pressure data
+using dynamic MRI, CT and color doppler ultrasound imaging
+may be valuable in identifying critical disease situations.
+5. Conclusion
+In this research, a biomechanical analysis was performed to
+improve our understanding of the phenomenon of urine peristal-
+tic transport from the kidney to the bladder. In-vivo morpho-
+metric data of ureteral lumen during peristalsis were used to
+construct a model which simulates ureteral peristalsis imple-
+menting mechanical wall stimulation through contact analysis.
+Results showed that urine reﬂux to the kidney occur by the wave
+onset and the quantity of ureteropelvic reﬂux decreases by
+distally propagating the wave through the ureter. Furthermore,
+quantitative analysis of urine ﬂow rate at the ureteral outlet
+during peristalsis was performed. This study quantitatively
+revealed the vital anti-reﬂux function of ureteropelvic junction.
+The numerical results may be helpful for experts in the ﬁeld of
+experimental biomedicine to design more realistic experiments
+which lead to better understanding of the intricate nature of
+ureteral peristalsis.
+References
+Arruda, E.M., Boyce, M.C., 1993. A three-dimensional constitutive model for the
+large stretch behavior of rubber elastic materials. J. Mech. Phys. Solids 41 (2),
+389–412.
+Bathe, K.J. (Ed.), Theory and Modeling Guide, Volume I. , ADINA, ADINA R & D, Inc.,
+Watertown.
+Bathe, K.J. (Ed.), Theory and Modeling Guide, Volume III. , ADINA CFD & FSI, ADINA
+R & D, Inc., Watertown.
+Bathe, M., Kamm, R.D., 1999. A ﬂuid–structure interaction ﬁnite element analysis
+of pulsatile blood ﬂowthrough a compliant stenotic artery. ASME J. Biomech.
+Eng. 121, 361–369.
+Bathe, K.J., Zhang, H., 2004. Finite element developments for general ﬂuid ﬂows
+with structural interactions. Int. J. Numer. Methods Eng. 60 (1), 213–232.
+Bathe, K.J., Zhang, H., 2009. A mesh adaptivity procedure for CFD and ﬂuid–
+structure interactions. Comput. Struct. 87, 604–617.
+Bathe, K.J., Zhang, H., Wang, M.H., 1995. Finite element analysis of incompressible
+and compressible ﬂuid ﬂows with free surfaces and structural interactions.
+Comput. Struct. 56, 193–213.
+Bathe, K.J., Zhang, H., Ji, S., 1999. Finite element analysis of ﬂuid ﬂows fully
+coupled with structural interactions. Comput. Struct. 72, 1–16.
+Bathe, K.J., Zhang, H., Zhang, X., 1997. Some advances in the analysis of ﬂuid ﬂows.
+Comput. Struct. 64, 909–930.
+Bykova, A.A., Regirer, S.A., 1999. Simple model of peristalsis in a myogenically-
+active tube. Euromech. Colloquium. 389, 68–69.
+Bykova, A.A., Regirer, S.A., 2005. Mathematical models in urinary system
+mechanics. J. Fluid Mech. 40 (1), 221–226.
+Carew, E.O., Pedley, T.J., 1997. An active membrane model for peristaltic pumping.
+Part 1. _Periodic activation waves in an inﬁnite tube. ASME J. Biomech. Eng.
+119 (1), 66–76.
+Constantinou, C.E., 1974. Renal pelvic pacemaker control of ureteral peristaltic
+rate. Am. J. Physiol. 226, 1413–1419.
+Eccles, M.R., 1998. The role of PAX2 in normal and abnormal development of the
+urinary tract. Pediatr. Nephrol. 12, 712–720.
+Fung, Y.C., 1971. Peristaltic pumping: a bioengineering model. In: Boyarsky, S.,
+Gottschalk, G.W., Tanagho, E.A., Zimskind, P.D. (Eds.), Urodynamics: Hydro-
+dynamics of the Ureter and Renal Pelvis. , Academic Press, New York,
+pp. 189–198.
+Fung, Y.C., 1993. Biomechanics: Mechanical Properties of Living Tissues. Springer-
+Verlag, New York.
+Fung, Y.C., 1996. Biomechanics: Circulation. Springer-Verlag, New York.
+Gintz, D., Elmabsout, B., Renaudeaux, J.P., 2001. Modelling of the human ureteral
+bolus. C. R. Acad. Sci. Paris, 303–306. t. 329, Seri II b.
+Gosling, J.A., Constantinou, C.E., 1976. The origin and propagation of upper urinary
+tract contraction waves. A new in vitro methodology. Experientia 32, 266–297.
+Grifﬁths, D.J., 1987. Dynamics of the upper urinary tract: I. peristaltic ﬂow through
+a distensible tube of limited length. Phys. Med. Biol. 32 (7), 813–822.
+Grifﬁths, D.J., Constantinou, E.C., Mortensen, J., Djurhuus, J.C., 1987. Dynamics of
+the upper urinary tract: II. the effect of variations of peristaltic frequency and
+bladder pressure on pyeloureteral pressure/ﬂow relations. Phys. Med. Biol. 32
+(7), 823–833.
+Grifﬁths, D.J., 1989. Flow of urine through the ureter: a collapsible, muscular tube
+undergoing peristalsis. J. Biomech. Eng. 111, 206–211.
+Grifﬁths, D.J., Notschaele, C., 1983. The mechanics of urine transport in the upper
+urinary tract: the dynamics of the isolated bolus. Neurourol. Urodynam. 2,
+155–156.
+Hansen, I., Gregersen, H., 1999. Morphometry and residual strain in porcine ureter.
+Scand. J. Urol. Nephrol. 33, 10–16.
+Jime´ nez-Lozano, J., 2009. Peristaltic ﬂow with application to ureteral Biomecha-
+nics. PhD. Thesis in Mechanical Engineering. Notre Dame University, Indiana,
+USA.
+Jorgensen, T.M., 1986. Pathogenetic factors in vesicoureteral reﬂux. Neurourol.
+Urodynam. 5, 153–183.
+Kontani, H., Ginkawa, M., Sakai, T., 1993. A simple method for measurement of
+ureteric peristaltic function in vivo and the effects of drugs acting on ion
+channels applied from the ureter lumen in anesthetized rats. Jpn. J. Pharmacol.
+62, 331–338.
+Lykoudis, P., Roos, R., 1970. The ﬂuid mechanics of the ureter from a lubrication
+theory point of view. J. Fluid Mech. 43, 661–674.
+Mahoney, Z.X., Sammut, B., Xavier, R.J., Cunningham, J., Go, G., Brim, K.L.,
+Stappenbeck, T.S., Miner, J.H., Swat, W., 2006. Discs-large homolog 1 regulates
+smooth muscle orientation in the mouse ureter. Proc. Natl. Acad. Sci. U.S.A 103
+(52), 19872–19877.
+Manton, M., 1975. Long-wavelength peristaltic pumping at low Reynolds number.
+J. Fluid Mech. 68, 681–693.
+Mastrict, R., Tauecchio, E.A., 1984. Bolus propagation in pig ureter in vitro. Urology
+XXIII, 157–162.
+Mazumdar, J.N., 1992. Bioﬂuid Mechanics. World Scientiﬁc Publishing Co. Pte. Ltd..
+Singapore, p. 44.
+Ohlson, L., 1989a. Morphological dynamics of ureteral transport I. Shape and
+volume of constituent urine fractions. Am. J. Physiol. 256, R19–R28.
+Ohlson, L., 1989b. Morphological dynamics of ureteral transport II. Peristaltic
+patterns in relation to ﬂow rate. Am. J. Physiol. 256, R29–R34.
+Ransley, P.G., Risdon, R.A., 1975. Renal papillary morphology in infants and young
+children. Urol. Res. 3, 110–113.
+Saeki, H., Morita, T., Nishimoto, T., Kondo, S., Tsuchida, S., 1985. Changes in the
+ureteral peristaltic rate and the bolus volume in gradual and rapid urinary
+ﬂow increase. Tohoku J. Exp. Med. 146, 273–275.
+Shapiro, A., Jaffrin, M., Weinberg, S., 1969. Peristaltic pumping with long wave-
+lengths at low Reynolds number. J. Fluid Mech. 37, 799–825.
+Takabatake, S., Ayukawa, K., Mori, A., 1988. Peristaltic ﬂow in circular cylindrical
+tubes under ﬁnite wavelengths and ﬁnite Re. J. Fluid Mech. 193, 267–283.
+Teran, J., Fauci, L., Shelley, M.J., 2008. Peristaltic pumping and irreversibility of a
+Stokesian viscoelastic ﬂuid. Phys. Fluids. 20, 073101.
+Vahidi, B., Fatouraee, N., 2007. Mathematical modeling of the ureteral peristaltic
+ﬂow with ﬂuid–structure interaction. J. Biomech. 40, S223.
+Vahidi, B., Fatouraee, N., Imanparast, A., Nasiraei-Moghaddam, A., 2011. A
+mathematical simulation of ureter: effects of the model parameters on
+ureteral pressure/ﬂow relations. J. Biomech. Eng. 133 (4), 031004.
+Vogel, A., Elmabsout, B., Gintz, D., 2004. Modelling of urine ﬂow in a ureteral bolus.
+C. R. Mecanique. 332, 737–742.
+Walker, S.W., Shelley, M.J., 2010. Shape optimization of peristaltic pumping. J.
+Comput. Phys. 229, 1260–1291.
+Weinberg, S.L., 1974. Ureteral function 1. simultaneous monitoring of ureteral
+peristalsis. Invest. Urol. 12, 103–107.
+Woodburne, R.T., Lapides, J., 1972. The ureteral lumen during peristalsis. Am. J.
+Anat. 133 (3), 255–258.
+Xiao, Q., Damodaran, M., 2002. A numerical investigation of peristaltic waves in
+circular tubes. Int. J. Comput. Fluid D 16 (3), 201–216.
+Yin, F.C.P., Fung, Y.C., 1969. Peristaltic transport. J. Appl. Mech. 35, 669–675.
+Yin, F.C.P., Fung, Y.C., 1971. Mechanical properties of isolated mammalian ureteral
+segments. Am. J. Physiol. 221 (5), 1484–1493.
+Zawalinski, V.C., Constantinou, C.E., Burnstock, G., 1975. Ureteral pacemaker
+potentials recorded with the sucrose gap technique. Experientia 31, 931–933.
+Zelenko, N., Coll, D., Rosenfeld, A.T., Smith, R.C., 2004. Normal ureter size on
+unenhanced helical CT. Am. J. Roentgenol. 182, 1039–1041.
+Zhang, H., Bathe, K.J., 2001. Direct and iterative computing of ﬂuid ﬂows fully
+coupled with structures. In: Bathe, K.J. (Ed.), Computational Fluid and Solid
+Mechanics. , Elsevier Science, New York.
+Zien, T., Ostrach, S., 1970. A long wave approximation of peristaltic motion. J.
+Biomech. 3, 63–75.
+B. Vahidi, N. Fatouraee / Journal of Theoretical Biology 298 (2012) 42–5050

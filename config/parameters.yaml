@@ -24,7 +24,8 @@ design_variables:
     range: [4.0, 12.0]
     default: 6.0
     description: "Proximal coil radius in mm"
-    
+
+
   pitch_prox:
     type: continuous
     range: [4.0, 10.0]
