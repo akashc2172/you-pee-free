@@ -53,21 +53,21 @@ The domain consists of a **pigtail stent** (blue) sitting inside a **deformable 
 - **Outlet (Bladder)**: 0 Pa baseline, spiking to 10 kPa during cough.
 - **Wall**: Moving mesh (ALE) driven by the peristaltic function.
 
-![Geometry Schematic](images/geometry_schematic.png)
+![Geometry Schematic](/Users/akashc/masters/docs/images/geometry_schematic.png)
 
 ### B. The Peristaltic Wave (`flc2hs`)
 This is the "squeezing" function. We use a smoothed Heaviside step to avoid crashing the solver.
 - **Shape**: A 5 cm long bolus of high pressure (3.5 kPa) traveling at 2.5 cm/s.
 - **Visual**: The blue region pushes urine (and the stent) downwards.
 
-![Peristaltic Wave](images/peristalsis_wave.png)
+![Peristaltic Wave](/Users/akashc/masters/docs/images/peristalsis_wave.png)
 
 ### C. The "Water Hammer" (Cough Impulse)
 This is the "failure mode". A sudden cough sends a shockwave up the stent.
 - **Shape**: A 100 ms Gaussian spike reaching 10 kPa (dangerous reflux).
 - **Goal**: The stent must resist this backflow.
 
-![Cough Impulse](images/cough_impulse.png)
+![Cough Impulse](/Users/akashc/masters/docs/images/cough_impulse.png)
 
 ### D. The Simulation Loop
 ```mermaid
