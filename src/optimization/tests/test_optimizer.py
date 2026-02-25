@@ -73,3 +73,16 @@ class TestBayesianOptimizer:
             max_val = config.design_vars[col].range[1]
             expected = (min_val + max_val) / 2
             assert np.isclose(x_raw[0, i].item(), expected)
+
+    def test_resolve_effective_features_prefers_realized_hole_counts(self, mock_model):
+        config = ConfigLoader()
+        feature_names = config.get_parameter_names()
+        df = pd.DataFrame([{k: config.design_vars[k].default for k in feature_names}])
+        df["realized_n_prox"] = 1
+        df["realized_n_mid"] = 2
+        df["realized_n_dist"] = 3
+
+        X = BayesianOptimizer.resolve_effective_features(df, feature_names)
+        assert X.loc[0, "n_prox"] == 1
+        assert X.loc[0, "n_mid"] == 2
+        assert X.loc[0, "n_dist"] == 3

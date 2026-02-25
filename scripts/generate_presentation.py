@@ -126,7 +126,7 @@ def main():
         ("test_stent_generator.py", 1),
         ("  - Verifies geometric constraints (ID > 0.6mm)", 2),
         ("  - Checks hole packing (no overlap)", 2),
-        ("  - Ensures watertight STL mesh", 2),
+        ("  - Enforces STL mesh QA (watertight/manifold checks)", 2),
         "Status: PASS (100% Coverage)"
     ])
 
@@ -145,7 +145,7 @@ def main():
     create_slide(prs, "Current Status", [
         "Pipeline Built & Verified",
         ("Python 3.8+ modular codebase", 1),
-        ("Automated CAD generation (SolidPython)", 1),
+        ("Automated CAD generation (build123d)", 1),
         ("GP Surrogates integrated (BoTorch/GPyTorch)", 1),
         "Next Steps:",
         ("1. Run 'Campaign 001' (LHS Initialization)", 1),

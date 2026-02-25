@@ -15,8 +15,46 @@ Validated for COMSOL CFD import via STEP export.
 from build123d import *
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Literal, Optional
 import math
+
+from src.cad.mesh_quality import validate_stl
+
+
+STL_QUALITY_PROFILES: Dict[str, Dict[str, float]] = {
+    "draft": {"tolerance": 0.005, "angular_tolerance": 0.25},
+    "standard": {"tolerance": 0.001, "angular_tolerance": 0.1},
+    "high": {"tolerance": 0.0005, "angular_tolerance": 0.05},
+}
+
+
+@dataclass
+class StlExportOptions:
+    """STL export/QA options."""
+
+    tolerance: float = 0.001
+    angular_tolerance: float = 0.1
+    ascii_format: bool = False
+    validate_mesh: bool = True
+    quality_profile: Literal["draft", "standard", "high"] = "standard"
+
+    @classmethod
+    def from_profile(
+        cls,
+        quality_profile: Literal["draft", "standard", "high"] = "standard",
+        ascii_format: bool = False,
+        validate_mesh: bool = True,
+    ) -> "StlExportOptions":
+        if quality_profile not in STL_QUALITY_PROFILES:
+            raise ValueError(f"Unknown STL quality profile: {quality_profile}")
+        profile = STL_QUALITY_PROFILES[quality_profile]
+        return cls(
+            tolerance=profile["tolerance"],
+            angular_tolerance=profile["angular_tolerance"],
+            ascii_format=ascii_format,
+            validate_mesh=validate_mesh,
+            quality_profile=quality_profile,
+        )
 
 
 @dataclass
@@ -109,8 +147,8 @@ class StentParameters:
         self._validate_hole_packing('mid', self.section_length_mid, self.n_mid)
         self._validate_hole_packing('dist', self.section_length_dist, self.n_dist)
         
-        # Precompute hole positions along body
-        self.hole_positions = self._compute_hole_positions()
+        # Precompute requested and realized hole positions along body
+        self._compute_and_finalize_holes()
     
     def _validate_hole_packing(self, section: str, length: float, n_holes: int):
         """Check if holes fit in section without overlap."""
@@ -127,39 +165,90 @@ class StentParameters:
                 f"Reduce n_{section} or hole diameter."
             )
     
-    def _compute_hole_positions(self) -> List[float]:
-        """Compute axial positions of all holes along the body."""
-        positions = []
+    def _compute_section_positions(self, start: float, end: float, n_holes: int) -> List[float]:
+        """Compute evenly spaced positions within a section interval."""
+        if n_holes <= 0:
+            return []
+        if n_holes == 1:
+            return [(start + end) / 2.0]
+        spacing = (end - start) / (n_holes - 1)
+        return [start + i * spacing for i in range(n_holes)]
+
+    def _compute_requested_hole_positions(self) -> Dict[str, List[float]]:
+        """Compute requested section-wise hole positions."""
         buffer = max(self.BUFFER_MIN, self.hole_radius)
-        
-        # Proximal section: 0 to section_length_prox
-        if self.n_prox > 0:
-            start = buffer
-            end = self.section_length_prox - buffer
-            spacing = (end - start) / max(1, self.n_prox - 1) if self.n_prox > 1 else 0
-            for i in range(self.n_prox):
-                pos = start + i * spacing if self.n_prox > 1 else (start + end) / 2
-                positions.append(pos)
-        
-        # Middle section: section_length_prox to section_length_prox + section_length_mid
-        if self.n_mid > 0:
-            mid_start = self.section_length_prox + buffer
-            mid_end = self.section_length_prox + self.section_length_mid - buffer
-            spacing = (mid_end - mid_start) / max(1, self.n_mid - 1) if self.n_mid > 1 else 0
-            for i in range(self.n_mid):
-                pos = mid_start + i * spacing if self.n_mid > 1 else (mid_start + mid_end) / 2
-                positions.append(pos)
-        
-        # Distal section: (prox + mid) to stent_length
-        if self.n_dist > 0:
-            dist_start = self.section_length_prox + self.section_length_mid + buffer
-            dist_end = self.stent_length - buffer
-            spacing = (dist_end - dist_start) / max(1, self.n_dist - 1) if self.n_dist > 1 else 0
-            for i in range(self.n_dist):
-                pos = dist_start + i * spacing if self.n_dist > 1 else (dist_start + dist_end) / 2
-                positions.append(pos)
-        
-        return positions
+
+        prox_start = buffer
+        prox_end = self.section_length_prox - buffer
+
+        mid_start = self.section_length_prox + buffer
+        mid_end = self.section_length_prox + self.section_length_mid - buffer
+
+        dist_start = self.section_length_prox + self.section_length_mid + buffer
+        dist_end = self.stent_length - buffer
+
+        return {
+            "prox": self._compute_section_positions(prox_start, prox_end, self.n_prox),
+            "mid": self._compute_section_positions(mid_start, mid_end, self.n_mid),
+            "dist": self._compute_section_positions(dist_start, dist_end, self.n_dist),
+        }
+
+    def _compute_and_finalize_holes(self):
+        """Compute requested and realized hole maps with unroof-aware distal rebalance."""
+        requested = self._compute_requested_hole_positions()
+        realized = {
+            "prox": list(requested["prox"]),
+            "mid": list(requested["mid"]),
+            "dist": list(requested["dist"]),
+        }
+
+        self.requested_n_prox = self.n_prox
+        self.requested_n_mid = self.n_mid
+        self.requested_n_dist = self.n_dist
+        self.requested_body_holes = self.n_prox + self.n_mid + self.n_dist
+
+        self.suppressed_holes_due_to_unroofed = 0
+        self.suppressed_holes_due_to_clearance = 0
+
+        # Distal overlap policy: auto-rebalance into legal distal interval.
+        if self.unroofed_length > 0 and self.n_dist > 0:
+            hole_clearance = max(self.BUFFER_MIN, self.hole_radius)
+            unroof_start = self.stent_length - self.unroofed_length
+
+            distal_positions = requested["dist"]
+            kept = []
+            for pos in distal_positions:
+                if pos >= unroof_start:
+                    self.suppressed_holes_due_to_unroofed += 1
+                elif pos >= unroof_start - hole_clearance:
+                    self.suppressed_holes_due_to_clearance += 1
+                else:
+                    kept.append(pos)
+
+            dist_start = self.section_length_prox + self.section_length_mid + hole_clearance
+            legal_end = min(self.stent_length - hole_clearance, unroof_start - hole_clearance)
+
+            if legal_end > dist_start:
+                pitch_min = self.d_sh + self.GAP_MIN
+                legal_len = legal_end - dist_start
+                max_fit = int(legal_len / pitch_min) + 1
+                target_count = min(self.n_dist, max_fit)
+                realized["dist"] = self._compute_section_positions(dist_start, legal_end, target_count)
+            else:
+                realized["dist"] = []
+
+        self.requested_hole_positions_by_section = requested
+        self.realized_hole_positions_by_section = realized
+        self.requested_hole_positions = requested["prox"] + requested["mid"] + requested["dist"]
+        self.realized_hole_positions = realized["prox"] + realized["mid"] + realized["dist"]
+
+        self.realized_n_prox = len(realized["prox"])
+        self.realized_n_mid = len(realized["mid"])
+        self.realized_n_dist = len(realized["dist"])
+        self.realized_body_holes = self.realized_n_prox + self.realized_n_mid + self.realized_n_dist
+
+        # Backward-compatible aliases for downstream callers.
+        self.hole_positions = self.realized_hole_positions
 
 
 class StentGenerator:
@@ -180,6 +269,8 @@ class StentGenerator:
     def generate(self) -> Part:
         """Generate the complete stent solid."""
         p = self.params
+        p.coil_holes_requested = len(p.coil_hole_params) * int(p.turns_prox > 0) + len(p.coil_hole_params) * int(p.turns_dist > 0)
+        p.coil_holes_realized = 0
         
         # 1. Generate helix paths
         prox_wire, body_start_pt, body_start_tan = self._make_prox_helix()
@@ -202,9 +293,11 @@ class StentGenerator:
         # 6. Cut holes
         hollow = self._cut_body_holes(hollow, body_start_pt, body_start_tan)
         if prox_wire:
-            hollow = self._cut_coil_holes(hollow, prox_wire)
+            hollow, n_ok = self._cut_coil_holes(hollow, prox_wire)
+            p.coil_holes_realized += n_ok
         if dist_wire:
-            hollow = self._cut_coil_holes(hollow, dist_wire)
+            hollow, n_ok = self._cut_coil_holes(hollow, dist_wire)
+            p.coil_holes_realized += n_ok
         
         self._solid = hollow
         return hollow
@@ -317,7 +410,7 @@ class StentGenerator:
         return solid - cutter
     
     def _cut_body_holes(self, solid: Part, start_pt: Vector, axis: Vector) -> Part:
-        """Cut side holes along the body at precomputed positions."""
+        """Cut side holes along the body at realized positions."""
         p = self.params
         axis = axis.normalized()
         
@@ -328,19 +421,20 @@ class StentGenerator:
         
         with BuildPart() as bp:
             add(solid)
-            for i, d in enumerate(p.hole_positions):
+            for i, d in enumerate(p.realized_hole_positions):
                 center = start_pt + (axis * d)
                 cut_dir = v1 if i % 2 == 0 else v2
                 with BuildSketch(Plane(origin=center, z_dir=cut_dir)):
                     Circle(radius=p.hole_radius)
-                # One-wall cut (both=False)
-                extrude(amount=p.r_outer * 4, both=False, mode=Mode.SUBTRACT)
+                # Bidirectional cut through the entire tube to prevent non-manifold edges
+                extrude(amount=p.r_outer * 4, both=True, mode=Mode.SUBTRACT)
         return bp.part
     
-    def _cut_coil_holes(self, solid: Part, wire: Wire) -> Part:
+    def _cut_coil_holes(self, solid: Part, wire: Wire) -> tuple[Part, int]:
         """Cut holes at specified t-parameters along a coil wire."""
         p = self.params
         result = solid
+        n_success = 0
         
         for t_val in p.coil_hole_params:
             try:
@@ -352,9 +446,10 @@ class StentGenerator:
                         Circle(radius=p.hole_radius)
                     extrude(amount=p.r_outer * 3, both=False, mode=Mode.SUBTRACT)
                 result = bp.part
+                n_success += 1
             except Exception:
                 pass  # Skip if location fails
-        return result
+        return result, n_success
     
     def export_step(self, path: Path):
         """Export to STEP format (for COMSOL import)."""
@@ -364,25 +459,66 @@ class StentGenerator:
         path.parent.mkdir(parents=True, exist_ok=True)
         export_step(self._solid, str(path))
     
-    def export_stl(self, path: Path):
-        """Export to STL format (for visualization)."""
+    def export_stl(self, path: Path, options: Optional[StlExportOptions] = None) -> dict:
+        """Export to STL format with explicit tessellation controls and optional QA."""
         if self._solid is None:
             self.generate()
+
+        options = options or StlExportOptions.from_profile("standard")
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        export_stl(self._solid, str(path))
+        export_stl(
+            self._solid,
+            str(path),
+            tolerance=options.tolerance,
+            angular_tolerance=options.angular_tolerance,
+            ascii_format=options.ascii_format,
+        )
+
+        qa = None
+        if options.validate_mesh:
+            qa_report = validate_stl(path)
+            qa = qa_report.to_dict()
+            if not qa_report.passed:
+                raise ValueError(
+                    f"STL QA failed for {path}: {', '.join(qa_report.fail_reasons)}"
+                )
+
+        return {
+            "path": str(path),
+            "profile": options.quality_profile,
+            "tolerance": options.tolerance,
+            "angular_tolerance": options.angular_tolerance,
+            "ascii": options.ascii_format,
+            "filesize_bytes": path.stat().st_size,
+            "qa": qa,
+        }
     
     def get_info(self) -> dict:
         """Return summary of stent geometry."""
         p = self.params
+        requested_total = p.requested_body_holes
+        realized_total = p.realized_body_holes
+        coil_requested = getattr(p, "coil_holes_requested", 0)
+        coil_realized = getattr(p, "coil_holes_realized", 0)
         return {
             "French": p.stent_french,
             "OD (mm)": round(p.OD, 3),
             "ID (mm)": round(p.ID, 3),
             "Wall (mm)": round(p.wall_thickness, 3),
             "Body Length (mm)": p.stent_length,
-            "Total Holes": len(p.hole_positions),
-            "Hole Positions": [round(x, 1) for x in p.hole_positions],
+            "Total Holes": realized_total,  # Deprecated legacy key: realized body holes.
+            "Requested Body Holes": requested_total,
+            "Realized Body Holes": realized_total,
+            "Requested n_prox/n_mid/n_dist": [p.requested_n_prox, p.requested_n_mid, p.requested_n_dist],
+            "Realized n_prox/n_mid/n_dist": [p.realized_n_prox, p.realized_n_mid, p.realized_n_dist],
+            "Suppressed Holes (Unroofed)": p.suppressed_holes_due_to_unroofed,
+            "Suppressed Holes (Clearance)": p.suppressed_holes_due_to_clearance,
+            "Coil Holes Requested": coil_requested,
+            "Coil Holes Realized": coil_realized,
+            "Requested Hole Positions": [round(x, 1) for x in p.requested_hole_positions],
+            "Realized Hole Positions": [round(x, 1) for x in p.realized_hole_positions],
             "Unroofed (mm)": p.unroofed_length,
         }
 

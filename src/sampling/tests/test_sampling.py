@@ -129,3 +129,26 @@ class TestFeasibilityFilter:
         
         assert len(valid_df) == 0
         assert "Hole packing (prox)" in report.rejection_reasons
+
+    def test_unroof_overlap_is_warning_not_rejection(self):
+        row = {
+            'stent_french': 4.7,
+            'stent_length': 120.0,
+            'r_t': 0.2,
+            'r_sh': 0.5,
+            'r_end': 0.3,
+            'section_length_prox': 45.0,
+            'section_length_dist': 43.0,
+            'n_prox': 8,
+            'n_mid': 13,
+            'n_dist': 10,
+            'coil_R_prox': 6.0, 'pitch_prox': 6.0, 'turns_prox': 1.5,
+            'coil_R_dist': 4.0, 'pitch_dist': 10.0, 'turns_dist': 0.5,
+            'unroofed_length': 35.0,
+        }
+        df = pd.DataFrame([row])
+        filt = FeasibilityFilter()
+        valid_df, report = filt.filter(df)
+        assert len(valid_df) == 1
+        assert report.rejection_reasons == {}
+        assert report.warning_reasons.get("requires_rebalance", 0) == 1

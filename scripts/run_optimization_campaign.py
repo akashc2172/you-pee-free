@@ -14,7 +14,6 @@ from pathlib import Path
 import pandas as pd
 import sys
 import logging
-import torch
 
 # Ensure project root is in path
 project_root = Path(__file__).parent.parent
@@ -24,9 +23,15 @@ from src.utils.config import ConfigLoader
 from src.utils.logging_utils import setup_simple_logging
 from src.surrogate.training import GPTrainer
 from src.optimization.optimizer import BayesianOptimizer
-from src.cad.stent_generator import StentGenerator, StentParameters
+from src.cad.stent_generator import StentGenerator, StentParameters, StlExportOptions
 from src.sampling.lhs_generator import LHSGenerator
 from src.sampling.feasibility import FeasibilityFilter
+
+
+def resolve_effective_training_features(df: pd.DataFrame, feature_names: list[str]) -> pd.DataFrame:
+    """Use realized hole-count features when available, fallback to requested."""
+    return BayesianOptimizer.resolve_effective_features(df, feature_names)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Run Optimization Campaign")
@@ -34,6 +39,19 @@ def main():
     parser.add_argument('--batch_size', type=int, default=5, help="Number of new candidates to suggest")
     parser.add_argument('--init_lhs', action='store_true', help="Initialize with LHS sampling if no data exists")
     parser.add_argument('--n_init', type=int, default=20, help="Number of initial LHS samples")
+    parser.add_argument('--export_stl', action='store_true', help="Also export STL files per design")
+    parser.add_argument(
+        '--stl_quality',
+        choices=['draft', 'standard', 'high'],
+        default=None,
+        help="STL tessellation profile",
+    )
+    parser.add_argument(
+        '--stl_validate',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable STL mesh QA checks",
+    )
     
     args = parser.parse_args()
     
@@ -48,6 +66,22 @@ def main():
     cad_dir.mkdir(parents=True, exist_ok=True)
     
     config = ConfigLoader()
+    stl_cfg = config.get_stl_export_config()
+    stl_default_profile = stl_cfg.get("default_profile", "standard")
+    stl_ascii = bool(stl_cfg.get("ascii_format", False))
+    default_validate = bool(stl_cfg.get("validate_mesh", True))
+
+    stl_profile = args.stl_quality or stl_default_profile
+    stl_validate = default_validate if args.stl_validate is None else args.stl_validate
+    stl_profiles = stl_cfg.get("profiles", {})
+
+    if args.export_stl:
+        logger.info(
+            "STL export enabled: profile=%s validate=%s ascii=%s",
+            stl_profile,
+            stl_validate,
+            stl_ascii,
+        )
     
     # 1. Load Data
     existing_data = None
@@ -84,7 +118,7 @@ def main():
         
         # Prepare Data
         feature_names = config.get_parameter_names()
-        X = existing_data[feature_names]
+        X = resolve_effective_training_features(existing_data, feature_names)
         y_cols = ['Q_out', 'delta_P'] # Make sure these match CSV headers exactly!
         
         # Check correctness of columns
@@ -129,6 +163,9 @@ def main():
                  start_id = int(ids.max().iloc[0]) + 1
         
         new_entries = []
+        stl_success = 0
+        stl_fail = 0
+        n_rebalanced = 0
         
         for i, (idx, row) in enumerate(candidates.iterrows()):
             design_id = f"design_{start_id + i:04d}"
@@ -151,16 +188,62 @@ def main():
                 generator.export_step(out_path)
                 
                 logger.info(f"  Generated {out_path.name}")
+
+                stl_path = None
+                stl_qa_pass = None
+                stl_fail_reasons = ""
+                if args.export_stl:
+                    stl_path = cad_dir / f"{design_id}.stl"
+
+                    if stl_profile in stl_profiles:
+                        profile_cfg = stl_profiles[stl_profile]
+                        stl_options = StlExportOptions(
+                            tolerance=float(profile_cfg["tolerance"]),
+                            angular_tolerance=float(profile_cfg["angular_tolerance"]),
+                            ascii_format=stl_ascii,
+                            validate_mesh=stl_validate,
+                            quality_profile=stl_profile,
+                        )
+                    else:
+                        stl_options = StlExportOptions.from_profile(
+                            quality_profile=stl_profile,
+                            ascii_format=stl_ascii,
+                            validate_mesh=stl_validate,
+                        )
+
+                    stl_meta = generator.export_stl(stl_path, options=stl_options)
+                    qa_meta = stl_meta.get("qa") or {}
+                    stl_qa_pass = qa_meta.get("passed") if stl_validate else None
+                    fail_reasons = qa_meta.get("fail_reasons") or []
+                    stl_fail_reasons = "; ".join(fail_reasons)
+                    stl_success += 1
                 
                 # Record metadata
                 entry = params_dict.copy()
                 entry['design_id'] = design_id
                 entry['cad_file'] = str(out_path)
+                entry['stl_file'] = str(stl_path) if stl_path else ""
+                entry['stl_qa_pass'] = stl_qa_pass
+                entry['stl_fail_reasons'] = stl_fail_reasons
+                entry['requested_n_prox'] = stent_params.requested_n_prox
+                entry['requested_n_mid'] = stent_params.requested_n_mid
+                entry['requested_n_dist'] = stent_params.requested_n_dist
+                entry['realized_n_prox'] = stent_params.realized_n_prox
+                entry['realized_n_mid'] = stent_params.realized_n_mid
+                entry['realized_n_dist'] = stent_params.realized_n_dist
+                entry['requested_body_holes'] = stent_params.requested_body_holes
+                entry['realized_body_holes'] = stent_params.realized_body_holes
+                entry['suppressed_holes_due_to_unroofed'] = stent_params.suppressed_holes_due_to_unroofed
+                entry['suppressed_holes_due_to_clearance'] = stent_params.suppressed_holes_due_to_clearance
                 entry['status'] = 'pending_simulation'
                 new_entries.append(entry)
+                if stent_params.requested_body_holes != stent_params.realized_body_holes:
+                    n_rebalanced += 1
                 
             except Exception as e:
                 logger.error(f"Failed to generate {design_id}: {e}")
+                if args.export_stl:
+                    stl_fail += 1
         
         # Save Batch Manifest
         if new_entries:
@@ -168,6 +251,9 @@ def main():
             batch_file = base_dir / f"batch_{start_id:04d}.csv"
             batch_df.to_csv(batch_file, index=False)
             logger.info(f"Saved batch manifest to {batch_file}")
+            if args.export_stl:
+                logger.info("STL export summary: success=%d failed=%d", stl_success, stl_fail)
+            logger.info("Hole rebalance summary: %d/%d designs adjusted", n_rebalanced, len(new_entries))
             
             print("\n" + "="*50)
             print(f"NEXT STEPS for Batch {start_id}:")

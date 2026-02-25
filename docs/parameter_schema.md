@@ -46,6 +46,8 @@ This document defines the parameter space for stent design optimization. **14 pa
 | L_use_prox | `L_prox - 2×buffer` | Usable length for holes (proximal) |
 | L_use_mid | `L_mid - 2×buffer` | Usable length for holes (middle) |
 | L_use_dist | `L_dist - 2×buffer` | Usable length for holes (distal) |
+| requested_body_holes | `n_sh_prox + n_sh_mid + n_sh_dist` | Requested body-hole count |
+| realized_body_holes | post-process | Realized body-hole count after unroofed rebalance |
 
 ---
 
@@ -110,6 +112,29 @@ Key interaction effects to investigate:
 - [ ] Define `derive_max_hole_dia()` formula based on structural constraints
 - [ ] Add any additional hard constraints (e.g., minimum wall thickness for manufacturability)
 - [ ] Confirm section count (3-section design: prox/mid/dist) or consider alternatives
+
+---
+
+## Requested vs Realized Hole Features
+
+When `unroofed_length > 0`, CAD applies an automatic distal-hole rebalance rule:
+- policy: `auto_rebalance`
+- clearance from unroof boundary: `max(buffer_min, hole_radius)`
+- holes in unroofed/clearance zones are suppressed and distal holes are redistributed within legal distal interval
+
+Result columns (campaign manifests):
+- `requested_n_prox/n_mid/n_dist`
+- `realized_n_prox/n_mid/n_dist`
+- `requested_body_holes`, `realized_body_holes`
+- `suppressed_holes_due_to_unroofed`
+- `suppressed_holes_due_to_clearance`
+
+Training feature rule:
+- prefer realized hole-count columns when present
+- fallback to requested columns for legacy data
+
+Migration compatibility:
+- older runs without realized columns remain valid by defaulting realized=requested.
 
 ---
 

@@ -15,6 +15,7 @@ class FeasibilityReport:
     n_input: int
     n_valid: int
     rejection_reasons: Dict[str, int]
+    warning_reasons: Dict[str, int]
     valid_indices: list
 
 class FeasibilityFilter:
@@ -35,13 +36,16 @@ class FeasibilityFilter:
         """
         valid_rows = []
         rejection_reasons = {}
+        warning_reasons = {}
         valid_indices = []
         
         for idx, row in df.iterrows():
-            reason = self._check_row(row)
+            reason, warning = self._check_row(row)
             if reason is None:
                 valid_rows.append(row)
                 valid_indices.append(idx)
+                if warning is not None:
+                    warning_reasons[warning] = warning_reasons.get(warning, 0) + 1
             else:
                 rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
         
@@ -58,6 +62,7 @@ class FeasibilityFilter:
             n_input=len(df),
             n_valid=len(valid_df),
             rejection_reasons=rejection_reasons,
+            warning_reasons=warning_reasons,
             valid_indices=valid_indices
         )
         
@@ -87,23 +92,27 @@ class FeasibilityFilter:
             filtered_args = {k: v for k, v in params_dict.items() if k in valid_keys}
             
             # Instantiate (triggers validation)
-            StentParameters(**filtered_args)
-            
-            return None
+            params = StentParameters(**filtered_args)
+
+            warning = None
+            if getattr(params, "requested_body_holes", 0) != getattr(params, "realized_body_holes", 0):
+                warning = "requires_rebalance"
+
+            return None, warning
             
         except ValueError as e:
             # Extract main reason (e.g. "ID", "Middle section", "Cannot fit")
             msg = str(e)
             if "ID" in msg and "ID_MIN" in msg:
-                return "ID < ID_MIN"
+                return "ID < ID_MIN", None
             elif "Middle section" in msg:
-                return "Middle section too short"
+                return "Middle section too short", None
             elif "Cannot fit" in msg:
-                if "prox" in msg: return "Hole packing (prox)"
-                if "mid" in msg: return "Hole packing (mid)"
-                if "dist" in msg: return "Hole packing (dist)"
-                return "Hole packing (other)"
+                if "prox" in msg: return "Hole packing (prox)", None
+                if "mid" in msg: return "Hole packing (mid)", None
+                if "dist" in msg: return "Hole packing (dist)", None
+                return "Hole packing (other)", None
             else:
-                return "Other: " + msg.split('.')[0]
+                return "Other: " + msg.split('.')[0], None
         except Exception as e:
-            return f"Unknown error: {str(e)}"
+            return f"Unknown error: {str(e)}", None

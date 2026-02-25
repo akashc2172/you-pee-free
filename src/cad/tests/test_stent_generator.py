@@ -4,8 +4,10 @@ Tests for the StentGenerator and StentParameters classes.
 
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 
-from src.cad.stent_generator import StentGenerator, StentParameters
+from src.cad.mesh_quality import MeshQualityReport
+from src.cad.stent_generator import StentGenerator, StentParameters, StlExportOptions
 
 
 class TestStentParameters:
@@ -55,6 +57,34 @@ class TestStentParameters:
         )
         assert len(params.hole_positions) == 7
         assert all(0 < p < 150 for p in params.hole_positions)
+        assert params.requested_body_holes == 7
+        assert params.realized_body_holes == 7
+
+    def test_unroofed_rebalances_distal_holes(self):
+        """Unroofed distal region should suppress/rebalance overlapping distal holes."""
+        params = StentParameters(
+            stent_length=120,
+            section_length_prox=45,
+            section_length_dist=43,
+            n_prox=8,
+            n_mid=13,
+            n_dist=10,
+            unroofed_length=35,
+            stent_french=4.7,
+            r_t=0.2,
+            r_sh=0.5,
+        )
+        assert params.requested_n_dist == 10
+        assert params.realized_n_dist < params.requested_n_dist
+        assert params.realized_body_holes < params.requested_body_holes
+        assert (params.suppressed_holes_due_to_unroofed + params.suppressed_holes_due_to_clearance) > 0
+
+    def test_unroofed_zero_keeps_requested(self):
+        """No unroofing means requested and realized counts match."""
+        params = StentParameters(unroofed_length=0, n_prox=3, n_mid=4, n_dist=2)
+        assert params.realized_n_prox == params.requested_n_prox
+        assert params.realized_n_mid == params.requested_n_mid
+        assert params.realized_n_dist == params.requested_n_dist
     
     def test_derived_dimensions(self):
         """Check derived dimension calculations."""
@@ -117,10 +147,95 @@ class TestStentGenerator:
         gen = StentGenerator(params)
         
         out_path = tmp_path / "test_stent.stl"
-        gen.export_stl(out_path)
+        info = gen.export_stl(out_path, options=StlExportOptions(validate_mesh=False))
         
         assert out_path.exists()
         assert out_path.stat().st_size > 0
+        assert info["path"] == str(out_path)
+        assert info["qa"] is None
+
+    def test_export_stl_profiles_apply_expected_tolerances(self, tmp_path: Path):
+        """Profile defaults should map to expected tessellation tolerances."""
+        params = StentParameters()
+        gen = StentGenerator(params)
+        out_path = tmp_path / "profile.stl"
+        options = StlExportOptions.from_profile("high", validate_mesh=False)
+
+        def _fake_export(_solid, file_path, **_kwargs):
+            Path(file_path).write_text("solid mock\nendsolid mock\n")
+            return True
+
+        with patch("src.cad.stent_generator.export_stl", side_effect=_fake_export) as mock_export:
+            gen.export_stl(out_path, options=options)
+
+        _, kwargs = mock_export.call_args
+        assert kwargs["tolerance"] == pytest.approx(0.0005)
+        assert kwargs["angular_tolerance"] == pytest.approx(0.05)
+        assert kwargs["ascii_format"] is False
+
+    def test_export_stl_returns_metadata(self, tmp_path: Path):
+        """STL export should include deterministic metadata and QA results."""
+        params = StentParameters()
+        gen = StentGenerator(params)
+        out_path = tmp_path / "metadata.stl"
+
+        report = MeshQualityReport(
+            watertight=True,
+            is_winding_consistent=True,
+            is_volume=True,
+            n_vertices=10,
+            n_faces=20,
+            euler_number=2,
+            non_manifold_edges=0,
+            degenerate_faces=0,
+            self_intersection_suspected=False,
+            passed=True,
+            fail_reasons=[],
+        )
+
+        with patch("src.cad.stent_generator.validate_stl", return_value=report):
+            info = gen.export_stl(out_path, options=StlExportOptions.from_profile("standard"))
+
+        assert info["profile"] == "standard"
+        assert info["qa"]["passed"] is True
+        assert info["filesize_bytes"] > 0
+
+    def test_export_stl_raises_on_failed_qa_when_validate_enabled(self, tmp_path: Path):
+        """QA failure should raise with fail reasons when validation is enabled."""
+        params = StentParameters()
+        gen = StentGenerator(params)
+        out_path = tmp_path / "badqa.stl"
+
+        report = MeshQualityReport(
+            watertight=False,
+            is_winding_consistent=False,
+            is_volume=False,
+            n_vertices=10,
+            n_faces=20,
+            euler_number=1,
+            non_manifold_edges=2,
+            degenerate_faces=1,
+            self_intersection_suspected=True,
+            passed=False,
+            fail_reasons=["not watertight", "non-manifold edges=2"],
+        )
+
+        with patch("src.cad.stent_generator.validate_stl", return_value=report):
+            with pytest.raises(ValueError, match="STL QA failed"):
+                gen.export_stl(out_path, options=StlExportOptions.from_profile("standard"))
+
+    def test_export_stl_no_qa_when_disabled(self, tmp_path: Path):
+        """QA function should not be called when validation is disabled."""
+        params = StentParameters()
+        gen = StentGenerator(params)
+        out_path = tmp_path / "noqa.stl"
+        options = StlExportOptions.from_profile("draft", validate_mesh=False)
+
+        with patch("src.cad.stent_generator.validate_stl") as validate_mock:
+            info = gen.export_stl(out_path, options=options)
+
+        validate_mock.assert_not_called()
+        assert info["qa"] is None
     
     def test_get_info(self):
         """Should return geometry summary."""
@@ -132,6 +247,8 @@ class TestStentGenerator:
         assert "French" in info
         assert info["French"] == 7.0
         assert "Total Holes" in info
+        assert "Requested Body Holes" in info
+        assert "Realized Body Holes" in info
 
 
 class TestParameterRanges:

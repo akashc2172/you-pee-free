@@ -161,6 +161,32 @@ sampling:
   n_dims: 16  # Total sampled dimensions
 
 # ==============================================================================
+# STL EXPORT DEFAULTS (visualization/manufacturing mesh)
+# ==============================================================================
+stl_export:
+  default_profile: "standard"
+  ascii_format: false
+  validate_mesh: true
+  profiles:
+    draft:
+      tolerance: 0.005
+      angular_tolerance: 0.25
+    standard:
+      tolerance: 0.001
+      angular_tolerance: 0.1
+    high:
+      tolerance: 0.0005
+      angular_tolerance: 0.05
+
+# ==============================================================================
+# CAD POST-PROCESS RULES (non-sampled behavior)
+# ==============================================================================
+cad_postprocess:
+  unroofed_hole_policy: "auto_rebalance"
+  unroofed_clearance_mode: "max(buffer_min,hole_radius)"
+  emit_realized_features: true
+
+# ==============================================================================
 # OUTPUT VARIABLES (from COMSOL)
 # ==============================================================================
 output_variables:

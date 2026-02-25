@@ -41,7 +41,7 @@
 |-------|-------|--------|---------|
 | **1. Design Space** | Parameter ranges (14 dimensions) | LHS samples (normalized [0,1]) | Python `pyDOE` or `scipy.stats.qmc` |
 | **2. Feasibility** | Raw LHS samples | Valid CAD parameters | `build123d` geometry checks |
-| **3. CAD Generation** | Valid parameters | `.step` files | `build123d` scripted |
+| **3. CAD Generation** | Valid parameters | `.step` + optional quality-gated `.stl` files | `build123d` scripted + STL mesh QA |
 | **4. CFD Simulation** | CAD geometry | Flow metrics | COMSOL Multiphysics |
 | **5. Surrogate Training** | (X, y) pairs | GP model | `scikit-learn`, `GPy`, or `BoTorch` |
 | **6. Validation** | Held-out test set | Error metrics | Custom diagnostics |
@@ -90,6 +90,7 @@ See [`decisions_gp_surrogate.md`](decisions_gp_surrogate.md) for detailed ration
 ### Parameter Schema → See [`parameter_schema.md`](parameter_schema.md)
 - 14 sampled dimensions → ~12 effective after constraints
 - Constraints: ID_min, gap_min, buffer zones, section lengths
+- For unroofed designs, body-hole features are tracked as `requested` and `realized`; training prefers realized hole counts when available.
 
 ### Metrics → See [`metrics_catalog.md`](metrics_catalog.md)
 - Pressure drop (ΔP)

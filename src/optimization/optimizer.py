@@ -134,3 +134,17 @@ class BayesianOptimizer:
         lower = torch.tensor(self.bounds_df.loc['min'].values, device=X_norm.device, dtype=torch.double)
         upper = torch.tensor(self.bounds_df.loc['max'].values, device=X_norm.device, dtype=torch.double)
         return X_norm * (upper - lower) + lower
+
+    @staticmethod
+    def resolve_effective_features(df: pd.DataFrame, feature_names: List[str]) -> pd.DataFrame:
+        """Prefer realized hole counts when present, fallback to requested."""
+        X = df[feature_names].copy()
+        mapping = {
+            "n_prox": "realized_n_prox",
+            "n_mid": "realized_n_mid",
+            "n_dist": "realized_n_dist",
+        }
+        for base, realized in mapping.items():
+            if base in X.columns and realized in df.columns:
+                X[base] = df[realized]
+        return X

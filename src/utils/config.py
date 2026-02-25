@@ -63,3 +63,11 @@ class ConfigLoader:
         
     def get_discrete_vars(self) -> List[str]:
         return [n for n, v in self.design_vars.items() if v.type == 'discrete']
+
+    def get_stl_export_config(self) -> Dict[str, Any]:
+        """Get STL export defaults and quality profiles."""
+        return self._raw.get("stl_export", {})
+
+    def get_cad_postprocess_config(self) -> Dict[str, Any]:
+        """Get CAD post-process behavior config."""
+        return self._raw.get("cad_postprocess", {})
