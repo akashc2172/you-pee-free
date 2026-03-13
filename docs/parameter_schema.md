@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the parameter space for stent design optimization. **14 parameters are sampled** via LHS, which reduce to **~12 effective dimensions** after feasibility constraints are applied.
+This document defines the current parameter space for stent design optimization. **11 parameters are sampled** via LHS in the active pipeline; coil geometry is fixed for this campaign stage.
 
 ## Sampling Strategy
 
@@ -13,24 +13,28 @@ This document defines the parameter space for stent design optimization. **14 pa
 
 ---
 
-## Sampled Parameters (14 dimensions)
+## Sampled Parameters (11 dimensions)
 
-| # | Symbol | Name | Unit | Range | Description |
-|---|--------|------|------|-------|-------------|
-| 1 | OD | Outer Diameter | mm | [TBD] | Total stent outer diameter |
-| 2 | ID | Inner Diameter | mm | [0.6, TBD] | Lumen diameter |
-| 3 | L_total | Total Length | mm | [TBD] | Overall stent length |
-| 4 | L_prox | Proximal Section Length | mm | fraction of L_total | Inlet section |
-| 5 | L_mid | Middle Section Length | mm | fraction of L_total | Central section |
-| 6 | L_dist | Distal Section Length | mm | fraction of L_total | Outlet section |
-| 7 | r_t | Wall Thickness Ratio | - | [0,1] | fraction: wall = r_t × (OD-ID)/2 |
-| 8 | r_sh | Side Hole Diameter Ratio | - | [0,1] | fraction of available space |
-| 9 | r_end | End Hole Diameter Ratio | - | [0,1] | fraction for proximal/distal holes |
-| 10 | n_sh_prox | # Proximal Side Holes | count | [0-10] | Number of side holes in proximal |
-| 11 | n_sh_mid | # Middle Side Holes | count | [0-15] | Number of side holes in middle |
-| 12 | n_sh_dist | # Distal Side Holes | count | [0-10] | Number of side holes in distal |
-| 13 | pitch_ratio | Hole Pitch Ratio | - | [TBD] | Normalized spacing between holes |
-| 14 | alpha | Hole Angle/Pattern | degrees or - | [TBD] | Angular placement pattern |
+| # | Name | Unit | Range |
+|---|------|------|-------|
+| 1 | `stent_french` | Fr | [4.0, 8.0] |
+| 2 | `stent_length` | mm | [100, 300] |
+| 3 | `r_t` | - | [0.10, 0.22] |
+| 4 | `r_sh` | - | [0.20, 0.70] |
+| 5 | `r_end` | - | [0.30, 0.95] |
+| 6 | `n_prox` | count | [0, 10] |
+| 7 | `n_mid` | count | [0, 15] |
+| 8 | `n_dist` | count | [0, 10] |
+| 9 | `section_length_prox` | mm | [20, 60] |
+| 10 | `section_length_dist` | mm | [20, 60] |
+| 11 | `unroofed_length` | mm | [0, 30] |
+
+## Fixed CAD Settings (Not Sampled)
+
+- `freeze_coil_geometry = true`
+- coil radius / helix pitch / helix turns are locked internally for v1
+- `half_open_distal_enabled = true`
+- `coil_hole_radius_mode = match_body_hole_radius`
 
 ---
 
@@ -122,12 +126,31 @@ When `unroofed_length > 0`, CAD applies an automatic distal-hole rebalance rule:
 - clearance from unroof boundary: `max(buffer_min, hole_radius)`
 - holes in unroofed/clearance zones are suppressed and distal holes are redistributed within legal distal interval
 
-Result columns (campaign manifests):
+Result columns (campaign manifests before COMSOL):
 - `requested_n_prox/n_mid/n_dist`
-- `realized_n_prox/n_mid/n_dist`
-- `requested_body_holes`, `realized_body_holes`
+- `precomsol_n_prox/n_mid/n_dist`
+- `requested_midsection_hole_count`
+- `precomsol_midsection_hole_count`
+- `requested_body_holes`
+- `precomsol_body_holes`
+- `precomsol_total_hole_area`
+- `precomsol_nearest_neighbor_spacing`
+- `precomsol_arc_positions`
 - `suppressed_holes_due_to_unroofed`
 - `suppressed_holes_due_to_clearance`
+
+Production `realized_*` columns remain present for schema stability, but they should stay null in the manifest until COMSOL exports them from the solved model.
+
+COMSOL run columns (batch results):
+- `sim_contract_version`
+- `domain_template`
+- `selection_strategy`
+- `run_status`
+- `failure_class`
+- `qc_fail_reasons`
+- `mass_imbalance`
+- `mesh_min_quality`
+- `parsed_realized_geometry_file`
 
 Training feature rule:
 - prefer realized hole-count columns when present

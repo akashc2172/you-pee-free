@@ -14,6 +14,8 @@ from pathlib import Path
 import pandas as pd
 import sys
 import logging
+import json
+from typing import Any, Dict
 
 # Ensure project root is in path
 project_root = Path(__file__).parent.parent
@@ -31,6 +33,125 @@ from src.sampling.feasibility import FeasibilityFilter
 def resolve_effective_training_features(df: pd.DataFrame, feature_names: list[str]) -> pd.DataFrame:
     """Use realized hole-count features when available, fallback to requested."""
     return BayesianOptimizer.resolve_effective_features(df, feature_names)
+
+
+def filter_valid_training_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Restrict surrogate training input to production-valid simulation rows."""
+    if "run_status" not in df.columns:
+        raise ValueError("results.csv is missing required column: run_status")
+    return df[df["run_status"] == "valid"].copy().reset_index(drop=True)
+
+
+def build_manifest_entry(
+    design_id: str,
+    params_dict: Dict[str, Any],
+    stent_params: StentParameters,
+    out_path: Path,
+    stl_path: Path | None,
+    stl_qa_pass: bool | None,
+    stl_fail_reasons: str,
+    sim_contract: Dict[str, Any],
+    fixed_cad_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build one manifest entry without treating CAD-side values as production realized geometry."""
+    entry = params_dict.copy()
+    entry["design_id"] = design_id
+    entry["cad_file"] = str(out_path)
+    entry["stl_file"] = str(stl_path) if stl_path else ""
+    entry["stl_qa_pass"] = stl_qa_pass
+    entry["stl_fail_reasons"] = stl_fail_reasons
+    entry["sim_contract_version"] = sim_contract.get("sim_contract_version", "unversioned")
+    entry["domain_template"] = sim_contract.get("domain_template", "unset")
+    entry["selection_strategy"] = sim_contract.get("selection_strategy", "unset")
+    entry["manifest_version"] = "v1"
+    entry["requested_n_prox"] = stent_params.requested_n_prox
+    entry["requested_n_mid"] = stent_params.requested_n_mid
+    entry["requested_n_dist"] = stent_params.requested_n_dist
+    entry["requested_midsection_hole_count"] = stent_params.requested_midsection_hole_count
+    entry["requested_body_holes"] = stent_params.requested_body_holes
+    entry["requested_coil_hole_count"] = getattr(stent_params, "requested_coil_hole_count", 0)
+    entry["requested_total_hole_count"] = getattr(
+        stent_params,
+        "requested_total_hole_count",
+        stent_params.requested_body_holes,
+    )
+    entry["requested_hole_positions"] = json.dumps(
+        [round(x, 6) for x in stent_params.requested_hole_positions]
+    )
+
+    # CAD-side postprocess metrics are useful for diagnostics, but they are not
+    # production realized geometry until COMSOL exports them from the solved model.
+    entry["precomsol_n_prox"] = stent_params.realized_n_prox
+    entry["precomsol_n_mid"] = stent_params.realized_n_mid
+    entry["precomsol_n_dist"] = stent_params.realized_n_dist
+    entry["precomsol_midsection_hole_count"] = stent_params.realized_midsection_hole_count
+    entry["precomsol_body_holes"] = stent_params.realized_body_holes
+    entry["precomsol_coil_hole_count"] = getattr(stent_params, "realized_coil_hole_count", 0)
+    entry["precomsol_total_hole_count"] = getattr(
+        stent_params,
+        "realized_total_hole_count",
+        stent_params.realized_body_holes,
+    )
+    entry["precomsol_body_hole_total_area"] = getattr(
+        stent_params,
+        "realized_body_hole_total_area",
+        0.0,
+    )
+    entry["precomsol_total_hole_area"] = getattr(
+        stent_params,
+        "realized_total_hole_area",
+        0.0,
+    )
+    entry["precomsol_body_hole_min_spacing"] = getattr(
+        stent_params,
+        "realized_body_hole_min_spacing",
+        None,
+    )
+    entry["precomsol_body_hole_mean_spacing"] = getattr(
+        stent_params,
+        "realized_body_hole_mean_spacing",
+        None,
+    )
+    entry["precomsol_nearest_neighbor_spacing"] = getattr(
+        stent_params,
+        "realized_nearest_neighbor_spacing",
+        None,
+    )
+    entry["precomsol_hole_positions"] = json.dumps(
+        [round(x, 6) for x in stent_params.realized_hole_positions]
+    )
+    entry["precomsol_arc_positions"] = json.dumps(
+        [round(x, 6) for x in getattr(stent_params, "realized_arc_positions", [])]
+    )
+
+    for key in [
+        "realized_n_prox",
+        "realized_n_mid",
+        "realized_n_dist",
+        "realized_midsection_hole_count",
+        "realized_body_holes",
+        "realized_coil_hole_count",
+        "realized_total_hole_count",
+        "realized_body_hole_total_area",
+        "realized_total_hole_area",
+        "realized_body_hole_min_spacing",
+        "realized_body_hole_mean_spacing",
+        "realized_nearest_neighbor_spacing",
+        "realized_hole_positions",
+        "realized_arc_positions",
+    ]:
+        entry[key] = None
+
+    entry["suppressed_holes_due_to_unroofed"] = stent_params.suppressed_holes_due_to_unroofed
+    entry["suppressed_holes_due_to_clearance"] = stent_params.suppressed_holes_due_to_clearance
+    entry["freeze_coil_geometry"] = stent_params.freeze_coil_geometry
+    entry["coil_hole_radius_mode"] = fixed_cad_cfg.get(
+        "coil_hole_radius_mode",
+        "match_body_hole_radius",
+    )
+    entry["run_status"] = "pending_simulation"
+    entry["failure_class"] = ""
+    return entry
 
 
 def main():
@@ -67,6 +188,8 @@ def main():
     
     config = ConfigLoader()
     stl_cfg = config.get_stl_export_config()
+    fixed_cad_cfg = config.get_fixed_cad_settings()
+    sim_contract = config.get_simulation_contract()
     stl_default_profile = stl_cfg.get("default_profile", "standard")
     stl_ascii = bool(stl_cfg.get("ascii_format", False))
     default_validate = bool(stl_cfg.get("validate_mesh", True))
@@ -114,24 +237,33 @@ def main():
             
     else:
         # 3. Active Learning Step
-        logger.info(f"Training surrogate on {len(existing_data)} data points...")
+        valid_data = filter_valid_training_rows(existing_data)
+        if valid_data.empty:
+            logger.error("No rows with run_status == 'valid' are available for surrogate training.")
+            sys.exit(1)
+
+        logger.info(
+            "Training surrogate on %d valid data points (filtered from %d total rows)...",
+            len(valid_data),
+            len(existing_data),
+        )
         
         # Prepare Data
         feature_names = config.get_parameter_names()
-        X = resolve_effective_training_features(existing_data, feature_names)
+        X = resolve_effective_training_features(valid_data, feature_names)
         y_cols = ['Q_out', 'delta_P'] # Make sure these match CSV headers exactly!
         
         # Check correctness of columns
-        missing_cols = [c for c in y_cols if c not in existing_data.columns]
+        missing_cols = [c for c in y_cols if c not in valid_data.columns]
         if missing_cols:
              # Try lowercase
              y_cols = ['q_out', 'delta_p']
-             missing_cols = [c for c in y_cols if c not in existing_data.columns]
+             missing_cols = [c for c in y_cols if c not in valid_data.columns]
              if missing_cols:
                  logger.error(f"Missing output columns in results: {missing_cols}")
                  sys.exit(1)
         
-        y = existing_data[y_cols]
+        y = valid_data[y_cols]
         
         # Train
         trainer = GPTrainer(output_dir=base_dir / "models")
@@ -175,6 +307,11 @@ def main():
             
             try:
                 # Instantiate parameters (validation happens here too)
+                params_dict["freeze_coil_geometry"] = bool(
+                    fixed_cad_cfg.get("freeze_coil_geometry", True)
+                )
+                if not bool(fixed_cad_cfg.get("half_open_distal_enabled", True)):
+                    params_dict["unroofed_length"] = 0.0
                 stent_params = StentParameters(**params_dict)
                 generator = StentGenerator(stent_params)
                 
@@ -219,23 +356,17 @@ def main():
                     stl_success += 1
                 
                 # Record metadata
-                entry = params_dict.copy()
-                entry['design_id'] = design_id
-                entry['cad_file'] = str(out_path)
-                entry['stl_file'] = str(stl_path) if stl_path else ""
-                entry['stl_qa_pass'] = stl_qa_pass
-                entry['stl_fail_reasons'] = stl_fail_reasons
-                entry['requested_n_prox'] = stent_params.requested_n_prox
-                entry['requested_n_mid'] = stent_params.requested_n_mid
-                entry['requested_n_dist'] = stent_params.requested_n_dist
-                entry['realized_n_prox'] = stent_params.realized_n_prox
-                entry['realized_n_mid'] = stent_params.realized_n_mid
-                entry['realized_n_dist'] = stent_params.realized_n_dist
-                entry['requested_body_holes'] = stent_params.requested_body_holes
-                entry['realized_body_holes'] = stent_params.realized_body_holes
-                entry['suppressed_holes_due_to_unroofed'] = stent_params.suppressed_holes_due_to_unroofed
-                entry['suppressed_holes_due_to_clearance'] = stent_params.suppressed_holes_due_to_clearance
-                entry['status'] = 'pending_simulation'
+                entry = build_manifest_entry(
+                    design_id=design_id,
+                    params_dict=params_dict,
+                    stent_params=stent_params,
+                    out_path=out_path,
+                    stl_path=stl_path,
+                    stl_qa_pass=stl_qa_pass,
+                    stl_fail_reasons=stl_fail_reasons,
+                    sim_contract=sim_contract,
+                    fixed_cad_cfg=fixed_cad_cfg,
+                )
                 new_entries.append(entry)
                 if stent_params.requested_body_holes != stent_params.realized_body_holes:
                     n_rebalanced += 1

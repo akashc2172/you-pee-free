@@ -26,17 +26,10 @@ def main():
         stent_french=6.0,
         stent_length=150.0,
         
-        # Proximal Coil
-        coil_R_prox=6.0,
-        pitch_prox=6.0,
-        turns_prox=1.5,
+        # Coil geometry is frozen by default in StentParameters
+        # (fixed radius/pitch/turns for this campaign stage).
         section_length_prox=30.0,
         n_prox=3,
-        
-        # Distal Coil
-        coil_R_dist=6.0,
-        pitch_dist=6.0,
-        turns_dist=1.5,
         section_length_dist=30.0,
         n_dist=3,
         

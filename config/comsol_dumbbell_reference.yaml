@@ -1,0 +1,40 @@
+normalized_frame:
+  shaft_axis: "+x"
+  body_start_x_mm: 0.0
+  body_center_y_mm: 0.0
+  body_center_z_mm: 0.0
+  notes:
+    - "The exported STEP uses the generator-normalized solid directly."
+    - "The straight body shaft starts at x = 0 mm."
+    - "The straight body centerline is centered at y = 0 mm and z = 0 mm."
+    - "The proximal coil may extend into negative x."
+
+dumbbell_dimensions_mm:
+  kidney_reservoir_radius_mm: 18.0
+  kidney_reservoir_length_mm: 20.0
+  ureter_tube_radius_mm: 4.0
+  ureter_tube_length_rule: "span from export_body_start_x to export_body_end_x"
+  bladder_reservoir_radius_mm: 18.0
+  bladder_reservoir_length_mm: 20.0
+
+placement_rules:
+  kidney_reservoir_start_x_rule: "export_body_start_x - kidney_reservoir_length_mm"
+  ureter_tube_start_x_rule: "export_body_start_x"
+  bladder_reservoir_start_x_rule: "export_body_end_x"
+  center_y_rule: "export_body_center_y"
+  center_z_rule: "export_body_center_z"
+  notes:
+    - "Build all three cylinders along the global x-axis."
+    - "Center the ureter tube on the straight shaft centerline, not the whole-solid bounding box center."
+    - "Use the body end for the bladder start; the distal reservoir covers the distal coil."
+
+selection_boxes_mm:
+  inlet_cap_thickness_mm: 1.0
+  outlet_cap_thickness_mm: 1.0
+  coil_zone_yz_half_width_mm: 18.0
+  mid_zone_yz_half_width_mm: 4.0
+  mid_zone_start_fraction: 0.25
+  mid_zone_end_fraction: 0.75
+  notes:
+    - "Create coil_zone as the union of the proximal-coil x span [export_bbox_min_x, export_body_start_x] and the distal-coil x span [export_body_end_x, export_bbox_max_x]."
+    - "Create mid_zone on the straight shaft using the configured body-length fractions."

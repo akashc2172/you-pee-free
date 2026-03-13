@@ -2,12 +2,18 @@
 Tests for the StentGenerator and StentParameters classes.
 """
 
+import json
+import subprocess
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch
 
 from src.cad.mesh_quality import MeshQualityReport
 from src.cad.stent_generator import StentGenerator, StentParameters, StlExportOptions
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class TestStentParameters:
@@ -111,10 +117,17 @@ class TestStentGenerator:
     
     def test_generate_no_coils(self):
         """Should handle zero-turn coils."""
-        params = StentParameters(turns_prox=0, turns_dist=0)
+        params = StentParameters(turns_prox=0, turns_dist=0, freeze_coil_geometry=False)
         gen = StentGenerator(params)
         solid = gen.generate()
         assert solid is not None
+
+    def test_coils_fixed_by_default(self):
+        """Default behavior should pin coil geometry to fixed values."""
+        params = StentParameters(coil_R_prox=9.0, pitch_prox=9.0, turns_prox=2.2)
+        assert params.coil_R_prox == params.FIXED_COIL_R
+        assert params.pitch_prox == params.FIXED_PITCH
+        assert params.turns_prox == params.FIXED_TURNS
     
     def test_generate_with_unroofed(self):
         """Should handle unroofed section."""
@@ -129,7 +142,72 @@ class TestStentGenerator:
         gen = StentGenerator(params)
         solid = gen.generate()
         assert solid is not None
-    
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            StentParameters(),
+            StentParameters(stent_length=220, n_mid=8, unroofed_length=12.0),
+            StentParameters(turns_prox=0, turns_dist=0, freeze_coil_geometry=False),
+        ],
+    )
+    def test_generate_normalizes_export_orientation(self, params):
+        """Generated solids should export in a stable body-centered global frame."""
+        gen = StentGenerator(params)
+        solid = gen.generate()
+        bbox = solid.bounding_box()
+        tolerance = 1e-6
+
+        assert solid is not None
+        assert params.export_body_axis.X == pytest.approx(1.0, abs=tolerance)
+        assert params.export_body_axis.Y == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_axis.Z == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_start_x == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_center_y == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_center_z == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_end.X > params.export_body_start.X
+        assert params.export_body_end_x - params.export_body_start_x == pytest.approx(params.stent_length, abs=tolerance)
+        assert bbox.min.X <= tolerance
+
+    def test_generate_tracks_body_center_not_bbox_center(self):
+        """Body-center metadata should refer to the straight shaft, not the whole-solid bbox center."""
+        params = StentParameters()
+        gen = StentGenerator(params)
+        solid = gen.generate()
+        bbox = solid.bounding_box()
+        bbox_center_y = (bbox.min.Y + bbox.max.Y) / 2.0
+        bbox_center_z = (bbox.min.Z + bbox.max.Z) / 2.0
+
+        assert params.export_body_center_y == pytest.approx(0.0, abs=1e-6)
+        assert params.export_body_center_z == pytest.approx(0.0, abs=1e-6)
+        assert max(abs(bbox_center_y), abs(bbox_center_z)) > 1e-3
+
+    def test_body_cross_sections_are_centered_on_actual_solid(self):
+        """Actual straight-body cross-sections should be centered at y=z=0 after normalization."""
+        params = StentParameters()
+        gen = StentGenerator(params)
+        solid = gen.generate()
+
+        for center in gen._measure_body_cross_section_centers(solid):
+            assert center.Y == pytest.approx(0.0, abs=1e-6)
+            assert center.Z == pytest.approx(0.0, abs=1e-6)
+
+    def test_body_center_metadata_matches_measured_cross_sections(self):
+        """Helper metadata should come from measured shaft geometry, not only the body path."""
+        params = StentParameters()
+        gen = StentGenerator(params)
+        solid = gen.generate()
+        measured = gen._measure_body_cross_section_centers(solid)
+        mean_y = sum(center.Y for center in measured) / len(measured)
+        mean_z = sum(center.Z for center in measured) / len(measured)
+
+        assert params.export_body_center_y == pytest.approx(mean_y, abs=1e-6)
+        assert params.export_body_center_z == pytest.approx(mean_z, abs=1e-6)
+        assert params.export_body_center_start.Y == pytest.approx(mean_y, abs=1e-6)
+        assert params.export_body_center_start.Z == pytest.approx(mean_z, abs=1e-6)
+        assert params.export_body_center_end.Y == pytest.approx(mean_y, abs=1e-6)
+        assert params.export_body_center_end.Z == pytest.approx(mean_z, abs=1e-6)
+
     def test_export_step(self, tmp_path: Path):
         """Should export to STEP file."""
         params = StentParameters()
@@ -140,6 +218,66 @@ class TestStentGenerator:
         
         assert out_path.exists()
         assert out_path.stat().st_size > 0
+
+    def test_export_step_uses_normalized_geometry(self, tmp_path: Path):
+        """STEP export should use the canonicalized solid without extra COMSOL transforms."""
+        params = StentParameters()
+        gen = StentGenerator(params)
+        out_path = tmp_path / "normalized.step"
+        tolerance = 1e-6
+
+        with patch("src.cad.stent_generator.export_step") as mock_export:
+            gen.export_step(out_path)
+
+        exported_solid = mock_export.call_args.args[0]
+        bbox = exported_solid.bounding_box()
+
+        assert params.export_body_axis.X == pytest.approx(1.0, abs=tolerance)
+        assert params.export_body_axis.Y == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_axis.Z == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_start_x == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_center_y == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_center_z == pytest.approx(0.0, abs=tolerance)
+        assert params.export_body_end.X > params.export_body_start.X
+        assert bbox.min.X <= tolerance
+
+    def test_print_comsol_template_values_helper(self, tmp_path: Path):
+        """Helper script should emit deterministic template values from one design row."""
+        campaign_dir = tmp_path / "campaign"
+        campaign_dir.mkdir()
+        pd_row = (
+            "design_id,stent_french,stent_length,r_t,r_sh,r_end,n_prox,n_mid,n_dist,section_length_prox,section_length_dist,unroofed_length,cad_file\n"
+            "design_0000,6.0,150,0.15,0.5,0.7,3,6,3,30,30,0," + str(campaign_dir / "cad" / "design_0000.step") + "\n"
+        )
+        (campaign_dir / "batch_0000.csv").write_text(pd_row)
+
+        cmd = [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "print_comsol_template_values.py"),
+            "--campaign_dir",
+            str(campaign_dir),
+            "--design_id",
+            "design_0000",
+            "--json",
+        ]
+        proc = subprocess.run(
+            cmd,
+            check=True,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(proc.stdout)
+        values = payload["template_values"]
+
+        assert payload["design_id"] == "design_0000"
+        assert values["metadata"]["export_body_start_x"] == pytest.approx(0.0, abs=1e-6)
+        assert values["metadata"]["export_body_center_y"] == pytest.approx(0.0, abs=1e-6)
+        assert values["metadata"]["export_body_center_z"] == pytest.approx(0.0, abs=1e-6)
+        assert values["cylinders"]["ureter"]["x"] == pytest.approx(0.0, abs=1e-6)
+        assert values["cylinders"]["ureter"]["height_mm"] == pytest.approx(150.0, abs=1e-6)
+        assert values["selection_boxes"]["coil_zone"]["proximal_x_range_mm"][1] == pytest.approx(0.0, abs=1e-6)
+        assert values["selection_boxes"]["mid_zone"]["x_range_mm"] == pytest.approx([37.5, 112.5], abs=1e-6)
     
     def test_export_stl(self, tmp_path: Path):
         """Should export to STL file."""

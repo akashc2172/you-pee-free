@@ -3,7 +3,7 @@ Stent CAD Generator using build123d.
 
 This module provides the StentGenerator class for creating parametric stent
 geometries with:
-- Proximal and distal helical coils (independent parameters)
+- Proximal and distal helical coils (fixed geometry by default)
 - Hollow tube body with configurable wall thickness
 - Side holes in proximal, middle, and distal sections
 - Unroofed (half-pipe) distal section option
@@ -15,7 +15,7 @@ Validated for COMSOL CFD import via STEP export.
 from build123d import *
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import ClassVar, Dict, List, Literal, Optional
 import math
 
 from src.cad.mesh_quality import validate_stl
@@ -69,15 +69,18 @@ class StentParameters:
     stent_french: float = 6.0       # French size (1 Fr = 0.333 mm)
     stent_length: float = 150.0     # Total body length (mm)
     
-    # Coil parameters (proximal)
-    coil_R_prox: float = 6.0        # Coil radius (mm)
-    pitch_prox: float = 6.0         # Helix pitch (mm)
-    turns_prox: float = 1.5         # Number of helix turns
-    
-    # Coil parameters (distal)
+    # Coil geometry controls are intentionally locked for v1 campaign stability.
+    # They remain as fields for compatibility with older rows/scripts, but are
+    # overwritten by fixed constants when freeze_coil_geometry is true.
+    coil_R_prox: float = 6.0
+    pitch_prox: float = 6.0
+    turns_prox: float = 1.5
     coil_R_dist: float = 6.0
     pitch_dist: float = 6.0
     turns_dist: float = 1.5
+
+    # Freeze coil geometry by default for early campaign stability.
+    freeze_coil_geometry: bool = True
     
     # Fraction-based parameters (sampled 0-1, then derived)
     r_t: float = 0.15               # Wall thickness = r_t * OD
@@ -104,14 +107,44 @@ class StentParameters:
     BUFFER_MIN: float = 1.0         # Buffer from section ends (mm)
     CAP_MARGIN: float = 0.15        # d_sh <= ID - cap_margin (mm)
     ID_MIN: float = 0.6             # Minimum inner diameter (mm)
+    FIXED_COIL_R: ClassVar[float] = 6.0
+    FIXED_PITCH: ClassVar[float] = 6.0
+    FIXED_TURNS: ClassVar[float] = 1.5
+
+    # Export-frame metadata populated after geometry generation/canonicalization.
+    export_body_start: Optional[Vector] = None
+    export_body_end: Optional[Vector] = None
+    export_body_axis: Optional[Vector] = None
+    export_body_center_start: Optional[Vector] = None
+    export_body_center_end: Optional[Vector] = None
+    export_body_center_y: Optional[float] = None
+    export_body_center_z: Optional[float] = None
+    export_body_start_x: Optional[float] = None
+    export_body_end_x: Optional[float] = None
+    export_bbox_min_x: Optional[float] = None
+    export_bbox_max_x: Optional[float] = None
+    export_bbox_min: Optional[Vector] = None
+    export_bbox_max: Optional[Vector] = None
     
     def __post_init__(self):
         # Ensure integers for hole counts
         self.n_prox = int(self.n_prox)
         self.n_mid = int(self.n_mid)
         self.n_dist = int(self.n_dist)
-        
+
+        self._apply_fixed_coil_geometry()
         self._derive_and_validate()
+
+    def _apply_fixed_coil_geometry(self):
+        """Pin coil geometry to fixed values unless explicitly unfrozen."""
+        if not self.freeze_coil_geometry:
+            return
+        self.coil_R_prox = self.FIXED_COIL_R
+        self.pitch_prox = self.FIXED_PITCH
+        self.turns_prox = self.FIXED_TURNS
+        self.coil_R_dist = self.FIXED_COIL_R
+        self.pitch_dist = self.FIXED_PITCH
+        self.turns_dist = self.FIXED_TURNS
     
     def _derive_and_validate(self):
         """Derive absolute dimensions and validate geometry."""
@@ -132,6 +165,8 @@ class StentParameters:
         self.r_outer = self.OD / 2
         self.r_inner = self.ID / 2
         self.hole_radius = self.d_sh / 2
+        # Coil-hole radius is fixed in v1 to match body-hole radius.
+        self.coil_hole_radius = self.hole_radius
         
         # Derive middle section length
         self.section_length_mid = (
@@ -245,7 +280,24 @@ class StentParameters:
         self.realized_n_prox = len(realized["prox"])
         self.realized_n_mid = len(realized["mid"])
         self.realized_n_dist = len(realized["dist"])
+        self.requested_midsection_hole_count = self.requested_n_mid
+        self.realized_midsection_hole_count = self.realized_n_mid
         self.realized_body_holes = self.realized_n_prox + self.realized_n_mid + self.realized_n_dist
+        self.realized_body_hole_total_area = math.pi * (self.hole_radius ** 2) * self.realized_body_holes
+
+        sorted_realized = sorted(self.realized_hole_positions)
+        if len(sorted_realized) >= 2:
+            spacings = [b - a for a, b in zip(sorted_realized[:-1], sorted_realized[1:])]
+            self.realized_body_hole_min_spacing = min(spacings)
+            self.realized_body_hole_mean_spacing = sum(spacings) / len(spacings)
+            self.realized_nearest_neighbor_spacing = self.realized_body_hole_min_spacing
+        else:
+            self.realized_body_hole_min_spacing = None
+            self.realized_body_hole_mean_spacing = None
+            self.realized_nearest_neighbor_spacing = None
+
+        # Body holes alternate between two orthogonal angular cuts.
+        self.realized_arc_positions = [0.0 if i % 2 == 0 else 90.0 for i in range(self.realized_body_holes)]
 
         # Backward-compatible aliases for downstream callers.
         self.hole_positions = self.realized_hole_positions
@@ -298,9 +350,142 @@ class StentGenerator:
         if dist_wire:
             hollow, n_ok = self._cut_coil_holes(hollow, dist_wire)
             p.coil_holes_realized += n_ok
-        
+
+        p.requested_coil_hole_count = p.coil_holes_requested
+        p.realized_coil_hole_count = p.coil_holes_realized
+        p.requested_total_hole_count = p.requested_body_holes + p.requested_coil_hole_count
+        p.realized_total_hole_count = p.realized_body_holes + p.realized_coil_hole_count
+        p.realized_total_hole_area = math.pi * (p.hole_radius ** 2) * p.realized_total_hole_count
+
+        # Normalize all exported solids into one global frame so downstream
+        # COMSOL envelopes and coordinate boxes can assume a stable orientation.
+        hollow = self._canonicalize_export_frame(
+            hollow,
+            body_start_pt=body_start_pt,
+            body_end_pt=body_end_pt,
+            prox_wire=prox_wire,
+        )
+
         self._solid = hollow
         return hollow
+
+    @staticmethod
+    def _project_orthogonal(vector: Vector, axis: Vector) -> Vector:
+        """Remove the component of vector along axis."""
+        return vector - axis * vector.dot(axis)
+
+    def _stable_reference_normal(
+        self,
+        body_start_pt: Vector,
+        body_axis: Vector,
+        prox_wire: Optional[Wire],
+    ) -> Vector:
+        """Pick a repeatable perpendicular reference to fix roll about the shaft axis."""
+        candidates = []
+        if prox_wire:
+            candidates.append(prox_wire.edges()[0].start_point() - body_start_pt)
+        candidates.extend([Vector(0, 0, 1), Vector(0, 1, 0)])
+
+        for candidate in candidates:
+            projected = self._project_orthogonal(candidate, body_axis)
+            if projected.length > 1e-6:
+                return projected.normalized()
+        raise ValueError("Unable to determine a stable canonical export normal")
+
+    def _canonicalize_export_frame(
+        self,
+        solid: Part,
+        body_start_pt: Vector,
+        body_end_pt: Vector,
+        prox_wire: Optional[Wire],
+    ) -> Part:
+        """Align the straight body shaft to +X and anchor its centerline at the origin."""
+        def _snap(value: float) -> float:
+            return 0.0 if abs(value) < 1e-9 else float(value)
+
+        def _snap_vector(vector: Vector) -> Vector:
+            return Vector(_snap(vector.X), _snap(vector.Y), _snap(vector.Z))
+
+        p = self.params
+        body_axis = (body_end_pt - body_start_pt).normalized()
+        reference_normal = self._stable_reference_normal(body_start_pt, body_axis, prox_wire)
+
+        src_plane = Plane(origin=body_start_pt, x_dir=body_axis, z_dir=reference_normal)
+        target_plane = Plane(origin=(0, 0, 0), x_dir=(1, 0, 0), z_dir=(0, 0, 1))
+        alignment = target_plane.location * src_plane.location.inverse()
+
+        canonical = solid.moved(alignment)
+        export_body_start = target_plane.from_local_coords(src_plane.to_local_coords(body_start_pt))
+        export_body_end = target_plane.from_local_coords(src_plane.to_local_coords(body_end_pt))
+
+        # Anchor the straight-body centerline, not the whole-solid bounding box.
+        shift = Vector(-export_body_start.X, -export_body_start.Y, -export_body_start.Z)
+        canonical = canonical.moved(Location(shift))
+        measured_centers = self._measure_body_cross_section_centers(canonical)
+        measured_center_y = sum(center.Y for center in measured_centers) / len(measured_centers)
+        measured_center_z = sum(center.Z for center in measured_centers) / len(measured_centers)
+        canonical = canonical.moved(Location(Vector(0, -measured_center_y, -measured_center_z)))
+        bbox = canonical.bounding_box()
+
+        corrected_body_start = _snap_vector(export_body_start + shift + Vector(0, -measured_center_y, -measured_center_z))
+        corrected_body_end = _snap_vector(export_body_end + shift + Vector(0, -measured_center_y, -measured_center_z))
+        p.export_body_start = corrected_body_start
+        p.export_body_end = corrected_body_end
+        p.export_body_center_start = Vector(0.0, 0.0, 0.0)
+        p.export_body_center_end = Vector(_snap(corrected_body_end.X - corrected_body_start.X), 0.0, 0.0)
+        p.export_body_axis = _snap_vector((p.export_body_center_end - p.export_body_center_start).normalized())
+        p.export_body_center_y = 0.0
+        p.export_body_center_z = 0.0
+        p.export_body_start_x = 0.0
+        p.export_body_end_x = _snap(p.export_body_center_end.X)
+        p.export_bbox_min = _snap_vector(bbox.min)
+        p.export_bbox_max = _snap_vector(bbox.max)
+        p.export_bbox_min_x = _snap(bbox.min.X)
+        p.export_bbox_max_x = _snap(bbox.max.X)
+        return canonical
+
+    def _body_cross_section_sample_positions(self) -> List[float]:
+        """Choose body x-positions away from ends and hole centers for centroid checks."""
+        p = self.params
+        margin = max(p.r_outer * 2.0, p.BUFFER_MIN)
+        hole_clearance = max(p.hole_radius * 2.5, p.BUFFER_MIN)
+        candidates = [p.stent_length * frac for frac in (0.2, 0.35, 0.5, 0.65, 0.8)]
+        safe_positions = []
+
+        for x_pos in candidates:
+            if x_pos <= margin or x_pos >= p.stent_length - margin:
+                continue
+            if any(abs(x_pos - hole_pos) <= hole_clearance for hole_pos in p.realized_hole_positions):
+                continue
+            safe_positions.append(x_pos)
+
+        if safe_positions:
+            return safe_positions[:3]
+
+        boundaries = [margin]
+        boundaries.extend(
+            hole_pos for hole_pos in sorted(p.realized_hole_positions) if margin < hole_pos < p.stent_length - margin
+        )
+        boundaries.append(p.stent_length - margin)
+
+        for left, right in zip(boundaries[:-1], boundaries[1:]):
+            if right - left <= 2 * hole_clearance:
+                continue
+            safe_positions.append((left + right) / 2.0)
+
+        if safe_positions:
+            return safe_positions[:3]
+
+        midpoint = min(max(p.stent_length / 2.0, margin), p.stent_length - margin)
+        return [midpoint]
+
+    def _measure_body_cross_section_centers(self, solid: Part) -> List[Vector]:
+        """Measure actual shaft cross-section centroids from the final solid."""
+        centers: List[Vector] = []
+        for x_pos in self._body_cross_section_sample_positions():
+            section = solid.intersect(Plane(origin=(x_pos, 0, 0), z_dir=(1, 0, 0)))
+            centers.append(section.center(CenterOf.MASS))
+        return centers
     
     def _make_prox_helix(self):
         """Create proximal helix path. Returns (wire, end_point, end_tangent)."""
@@ -439,11 +624,11 @@ class StentGenerator:
         for t_val in p.coil_hole_params:
             try:
                 loc = wire.location_at(t_val)
-                cut_plane = Plane(origin=loc.position, z_dir=loc.x_axis)
+                cut_plane = Plane(origin=loc.position, z_dir=loc.x_axis.direction)
                 with BuildPart() as bp:
                     add(result)
                     with BuildSketch(cut_plane):
-                        Circle(radius=p.hole_radius)
+                        Circle(radius=p.coil_hole_radius)
                     extrude(amount=p.r_outer * 3, both=False, mode=Mode.SUBTRACT)
                 result = bp.part
                 n_success += 1
@@ -513,13 +698,36 @@ class StentGenerator:
             "Realized Body Holes": realized_total,
             "Requested n_prox/n_mid/n_dist": [p.requested_n_prox, p.requested_n_mid, p.requested_n_dist],
             "Realized n_prox/n_mid/n_dist": [p.realized_n_prox, p.realized_n_mid, p.realized_n_dist],
+            "Realized Body Hole Area (mm^2)": round(getattr(p, "realized_body_hole_total_area", 0.0), 4),
+            "Realized Min Body Hole Spacing (mm)": (
+                None if p.realized_body_hole_min_spacing is None else round(p.realized_body_hole_min_spacing, 4)
+            ),
+            "Realized Mean Body Hole Spacing (mm)": (
+                None if p.realized_body_hole_mean_spacing is None else round(p.realized_body_hole_mean_spacing, 4)
+            ),
+            "Realized Nearest Neighbor Spacing (mm)": (
+                None if p.realized_nearest_neighbor_spacing is None else round(p.realized_nearest_neighbor_spacing, 4)
+            ),
             "Suppressed Holes (Unroofed)": p.suppressed_holes_due_to_unroofed,
             "Suppressed Holes (Clearance)": p.suppressed_holes_due_to_clearance,
             "Coil Holes Requested": coil_requested,
             "Coil Holes Realized": coil_realized,
+            "Requested Midsection Hole Count": getattr(p, "requested_midsection_hole_count", p.requested_n_mid),
+            "Realized Midsection Hole Count": getattr(p, "realized_midsection_hole_count", p.realized_n_mid),
+            "Realized Total Hole Count": getattr(p, "realized_total_hole_count", p.realized_body_holes + coil_realized),
+            "Realized Total Hole Area (mm^2)": round(
+                getattr(
+                    p,
+                    "realized_total_hole_area",
+                    math.pi * (p.hole_radius ** 2) * (p.realized_body_holes + coil_realized),
+                ),
+                4,
+            ),
             "Requested Hole Positions": [round(x, 1) for x in p.requested_hole_positions],
             "Realized Hole Positions": [round(x, 1) for x in p.realized_hole_positions],
+            "Realized Arc Positions (deg)": [round(x, 1) for x in getattr(p, "realized_arc_positions", [])],
             "Unroofed (mm)": p.unroofed_length,
+            "Fixed Coil Geometry": p.freeze_coil_geometry,
         }
 
 

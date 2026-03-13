@@ -1,0 +1,31 @@
+{
+  "schema_version": "comsol_template_contract_v1",
+  "template_id": "base_flow_v1",
+  "template_version": "2026-03-12",
+  "parser_expectations_version": "comsol_parser_expectations_v1",
+  "sim_contract_version": "v1_deltaP490_steady_laminar",
+  "domain_template": "triple_domain_dumbbell",
+  "selection_strategy": "coordinate_bbox",
+  "pressure_contract": {
+    "mode": "pressure_driven",
+    "p_inlet_pa": 490.0,
+    "p_outlet_pa": 0.0,
+    "delta_p_pa": 490.0
+  },
+  "required_named_selections": [
+    "inlet",
+    "outlet",
+    "stent_walls",
+    "coil_zone",
+    "mid_zone"
+  ],
+  "required_exports": [
+    "results_csv",
+    "realized_geometry_csv"
+  ],
+  "artifact_filenames": {
+    "results_csv": "{run_id}_results.csv",
+    "realized_geometry_csv": "{run_id}_realized_geometry.csv",
+    "batch_log": "{run_id}.log"
+  }
+}

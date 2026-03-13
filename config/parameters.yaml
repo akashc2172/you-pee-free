@@ -18,45 +18,6 @@ design_variables:
     default: 150
     description: "Total body length in millimeters"
     
-  # Coil parameters (proximal)
-  coil_R_prox:
-    type: continuous
-    range: [4.0, 12.0]
-    default: 6.0
-    description: "Proximal coil radius in mm"
-
-
-  pitch_prox:
-    type: continuous
-    range: [4.0, 10.0]
-    default: 6.0
-    description: "Proximal helix pitch in mm"
-    
-  turns_prox:
-    type: continuous
-    range: [0.5, 2.5]
-    default: 1.5
-    description: "Number of proximal helix turns"
-    
-  # Coil parameters (distal)
-  coil_R_dist:
-    type: continuous
-    range: [4.0, 12.0]
-    default: 6.0
-    description: "Distal coil radius in mm"
-    
-  pitch_dist:
-    type: continuous
-    range: [4.0, 10.0]
-    default: 6.0
-    description: "Distal helix pitch in mm"
-    
-  turns_dist:
-    type: continuous
-    range: [0.5, 2.5]
-    default: 1.5
-    description: "Number of distal helix turns"
-    
   # Fraction-based parameters (guarantees valid geometry)
   r_t:
     type: continuous
@@ -158,7 +119,20 @@ sampling:
   default_samples: 60
   oversample_factor: 3
   random_seed: 42
-  n_dims: 16  # Total sampled dimensions
+  n_dims: 11  # Total sampled dimensions (coil geometry fixed)
+
+# ==============================================================================
+# FIXED CAD SETTINGS (not sampled in LHS)
+# ==============================================================================
+fixed_cad_settings:
+  freeze_coil_geometry: true
+  # Coil radius / helix pitch / helix turns are intentionally locked for v1.
+  # Keep them out of design variables and downstream manifests.
+  # coil_radius_mm: 6.0
+  # coil_pitch_mm: 6.0
+  # coil_turns: 1.5
+  half_open_distal_enabled: true
+  coil_hole_radius_mode: "match_body_hole_radius"
 
 # ==============================================================================
 # STL EXPORT DEFAULTS (visualization/manufacturing mesh)
@@ -185,6 +159,45 @@ cad_postprocess:
   unroofed_hole_policy: "auto_rebalance"
   unroofed_clearance_mode: "max(buffer_min,hole_radius)"
   emit_realized_features: true
+
+# ==============================================================================
+# CANONICAL COMSOL SIMULATION CONTRACT (campaign-level)
+# ==============================================================================
+simulation_contract:
+  sim_contract_version: "v1_deltaP490_steady_laminar"
+  validation_mode: false
+  physics:
+    model: "Single-Phase Flow (Laminar, spf)"
+    steady_state: true
+    incompressible: true
+    fluid_model: "Newtonian"
+    no_slip_walls: true
+    density_kg_m3: 1000.0
+    viscosity_pa_s: 0.001
+  boundary_conditions:
+    mode: "pressure_driven"
+    p_inlet_pa: 490.0
+    p_outlet_pa: 0.0
+    delta_p_pa: 490.0
+  domain_template: "triple_domain_dumbbell"
+  selection_strategy: "coordinate_bbox"
+  qc_thresholds:
+    max_mass_balance_error: 0.01
+    min_mesh_quality: 0.05
+    target_min_mesh_quality: 0.1
+    max_solver_relative_tolerance: 0.001
+    delta_p_abs_tolerance_pa: 1.0
+    require_finite_outputs: true
+    require_pressure_sign_consistency: true
+    require_flow_sign_consistency: true
+    require_explicit_solver_tolerance: true
+    require_realized_geometry: true
+  failure_policy:
+    on_qc_fail: "invalid_qc_penalty"
+    on_solver_fail: "failed_solver"
+    on_geometry_fail: "failed_geometry"
+    on_extraction_fail: "failed_extraction"
+    max_remesh_retries: 1
 
 # ==============================================================================
 # OUTPUT VARIABLES (from COMSOL)

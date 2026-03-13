@@ -143,8 +143,24 @@ class BayesianOptimizer:
             "n_prox": "realized_n_prox",
             "n_mid": "realized_n_mid",
             "n_dist": "realized_n_dist",
+            "requested_midsection_hole_count": "realized_midsection_hole_count",
+            # Future-proof mappings when additional realized geometry features
+            # are promoted into the sampled/training feature set.
+            "requested_body_holes": "realized_body_holes",
+            "requested_coil_hole_count": "realized_coil_hole_count",
+            "requested_total_hole_count": "realized_total_hole_count",
+            "body_hole_total_area": "realized_body_hole_total_area",
+            "total_hole_area": "realized_total_hole_area",
+            "body_hole_min_spacing": "realized_body_hole_min_spacing",
+            "body_hole_mean_spacing": "realized_body_hole_mean_spacing",
+            "nearest_neighbor_spacing": "realized_nearest_neighbor_spacing",
+            "arc_positions": "realized_arc_positions",
         }
         for base, realized in mapping.items():
             if base in X.columns and realized in df.columns:
                 X[base] = df[realized]
+
+        # Alternate realized feature names exported by COMSOL scripts.
+        if "n_mid" in X.columns and "realized_midsection_hole_count" in df.columns:
+            X["n_mid"] = df["realized_midsection_hole_count"]
         return X

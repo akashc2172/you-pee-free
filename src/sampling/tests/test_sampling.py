@@ -16,6 +16,8 @@ class TestConfigLoader:
         loader = ConfigLoader()
         assert 'stent_french' in loader.design_vars
         assert loader.design_vars['stent_french'].default == 6.0
+        assert loader.get_sim_contract_version() == "v1_deltaP490_steady_laminar"
+        assert loader.get_simulation_contract().get("domain_template") == "triple_domain_dumbbell"
         
     def test_get_bounds(self):
         loader = ConfigLoader()

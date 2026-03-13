@@ -71,3 +71,16 @@ class ConfigLoader:
     def get_cad_postprocess_config(self) -> Dict[str, Any]:
         """Get CAD post-process behavior config."""
         return self._raw.get("cad_postprocess", {})
+
+    def get_fixed_cad_settings(self) -> Dict[str, Any]:
+        """Get fixed CAD settings (non-sampled controls)."""
+        return self._raw.get("fixed_cad_settings", {})
+
+    def get_simulation_contract(self) -> Dict[str, Any]:
+        """Get canonical COMSOL simulation contract."""
+        return self._raw.get("simulation_contract", {})
+
+    def get_sim_contract_version(self) -> str:
+        """Get configured simulation contract version."""
+        sim = self.get_simulation_contract()
+        return str(sim.get("sim_contract_version", "unversioned"))

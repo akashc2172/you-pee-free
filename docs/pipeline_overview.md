@@ -10,7 +10,7 @@
 ┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │   INPUT      │     │    LHS SAMPLING  │     │  FEASIBILITY     │
 │   Space      │────▶│   (space-filling)│────▶│   FILTERING      │
-│  (14 dims)   │     │   oversample 3×  │     │  (hard constraints)│
+│  (11 dims)   │     │   oversample 3×  │     │  (hard constraints)│
 └──────────────┘     └──────────────────┘     └────────┬─────────┘
                                                       │
                               ┌───────────────────────┘
@@ -39,7 +39,7 @@
 
 | Phase | Input | Output | Tooling |
 |-------|-------|--------|---------|
-| **1. Design Space** | Parameter ranges (14 dimensions) | LHS samples (normalized [0,1]) | Python `pyDOE` or `scipy.stats.qmc` |
+| **1. Design Space** | Parameter ranges (11 dimensions) | LHS samples (normalized [0,1]) | `scipy.stats.qmc` |
 | **2. Feasibility** | Raw LHS samples | Valid CAD parameters | `build123d` geometry checks |
 | **3. CAD Generation** | Valid parameters | `.step` + optional quality-gated `.stl` files | `build123d` scripted + STL mesh QA |
 | **4. CFD Simulation** | CAD geometry | Flow metrics | COMSOL Multiphysics |
@@ -88,7 +88,7 @@ See [`decisions_gp_surrogate.md`](decisions_gp_surrogate.md) for detailed ration
 ## 5. Data Flow
 
 ### Parameter Schema → See [`parameter_schema.md`](parameter_schema.md)
-- 14 sampled dimensions → ~12 effective after constraints
+- 11 sampled dimensions (coil geometry fixed for this campaign stage)
 - Constraints: ID_min, gap_min, buffer zones, section lengths
 - For unroofed designs, body-hole features are tracked as `requested` and `realized`; training prefers realized hole counts when available.
 
@@ -96,13 +96,13 @@ See [`decisions_gp_surrogate.md`](decisions_gp_surrogate.md) for detailed ration
 - Pressure drop (ΔP)
 - Total output flow (Q_total)
 - Side hole flux distribution
-- (others TBD with Parnian)
+- Run trust/QC diagnostics: mass balance, mesh quality, convergence status
 
 ### Logging → See [`experiment_log.md`](experiment_log.md)
 - Git hash for code version
-- COMSOL model version
+- COMSOL template + simulation contract version
 - Parameter values
-- Run status & notes
+- Run status (`valid | invalid_qc | failed_solver | failed_geometry | failed_extraction`)
 
 ## 6. Success Criteria
 

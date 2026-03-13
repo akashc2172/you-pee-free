@@ -47,3 +47,10 @@ data/campaigns/
 
 # Agent
 .agent/
+
+# Build and Runs
+archive/
+artifacts/
+results/
+runs/
+logs/
