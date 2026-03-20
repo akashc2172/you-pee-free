@@ -1,0 +1,3 @@
+cad_path 'C:/akashcomsoltest/design_0000.step'
+hole_metadata_path 'C:/akashcomsoltest/design_0000.holes.json'
+design_id 'design_0000'

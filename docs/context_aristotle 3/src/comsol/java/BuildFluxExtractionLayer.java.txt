@@ -1,0 +1,955 @@
+// ==========================================================================
+// BuildFluxExtractionLayer — COMSOL 6.1 Application Builder Method
+// ==========================================================================
+//
+// PURPOSE
+//   Read <design_id>.meters.json and create a metadata-driven extraction layer
+//   for:
+//     - global inlet/outlet flow + pressure references
+//     - distal lumen / annulus pathway partition
+//     - per-hole cap flux
+//     - unroof patch flux
+//
+// OUTPUTS
+//   <design_id>_flux_scalars.csv
+//   <design_id>_flux_features.csv
+//
+// METHOD INPUTS (String)
+//   measurement_metadata_path
+//   design_id
+//
+// SELF-DISCOVERY FALLBACK
+//   If measurement_metadata_path is empty, this method looks next to the
+//   current output .mph for <design_id>.meters.json.
+//
+// IMPORTANT
+//   - Uses boring, flat Java intended for COMSOL Method Editor.
+//   - Reuses stable named selections "inlet" and "outlet" for global refs.
+//   - Creates no manual boundary-ID dependencies.
+//   - Does not modify legacy grouped outputs such as q_sh_prox/q_sh_mid/q_sh_dist.
+// ==========================================================================
+
+String measurementMetadataPathLocal = null;
+String designIdLocal = null;
+
+try {
+  if (measurement_metadata_path != null && measurement_metadata_path.trim().length() > 0) {
+    measurementMetadataPathLocal = measurement_metadata_path.trim();
+  }
+  if (design_id != null && design_id.trim().length() > 0) {
+    designIdLocal = design_id.trim();
+  }
+} catch (Exception _ignore) {}
+
+if (measurementMetadataPathLocal == null || designIdLocal == null) {
+  String _mphPath = model.getFilePath();
+  if (_mphPath != null && _mphPath.trim().length() > 0) {
+    java.nio.file.Path _mphFile = java.nio.file.Paths.get(_mphPath.trim());
+    String _mphName = _mphFile.getFileName().toString();
+    if (_mphName.endsWith(".mph")) _mphName = _mphName.substring(0, _mphName.length() - 4);
+    if (designIdLocal == null) designIdLocal = _mphName;
+    if (measurementMetadataPathLocal == null) {
+      java.nio.file.Path _inferredMeters = _mphFile.getParent().resolve(_mphName + ".meters.json");
+      if (java.nio.file.Files.exists(_inferredMeters)) {
+        measurementMetadataPathLocal = _inferredMeters.toString();
+      }
+    }
+  }
+}
+
+if (measurementMetadataPathLocal == null || measurementMetadataPathLocal.length() == 0) {
+  throw new RuntimeException("Could not resolve measurement_metadata_path from method inputs or model.getFilePath()");
+}
+if (designIdLocal == null || designIdLocal.length() == 0) {
+  throw new RuntimeException("Could not resolve design_id from method inputs or model.getFilePath()");
+}
+
+java.nio.file.Path metersPath = java.nio.file.Paths.get(measurementMetadataPathLocal).toAbsolutePath().normalize();
+if (!java.nio.file.Files.exists(metersPath)) {
+  throw new RuntimeException("measurement_metadata_path does not exist: " + metersPath.toString());
+}
+
+String METHOD_DEBUG_VERSION = "2026-03-19-column-fallback-v2";
+String DEFAULT_SOLUTION_DATASET_TAG = "DS_Solution_Main";
+String FALLBACK_SOLUTION_DATASET_TAG = "dset2";
+String FALLBACK_SOLUTION_TAG = "sol1";
+String MANAGED_DATASET_PREFIX = "CP_flux_";
+String MANAGED_NUMERICAL_PREFIX = "DV_flux_";
+String SCALARS_SUFFIX = "_flux_scalars.csv";
+String FEATURES_SUFFIX = "_flux_features.csv";
+String FLOW_EXPR = "6e7*(u*nx+v*ny+w*nz)";
+String FLOW_ABS_EXPR = "6e7*abs(u*nx+v*ny+w*nz)";
+String VEL_MAG_EXPR = "sqrt(u^2+v^2+w^2)";
+
+String raw = "";
+try {
+  raw = new String(
+    java.nio.file.Files.readAllBytes(metersPath),
+    java.nio.charset.StandardCharsets.UTF_8
+  );
+} catch (Exception _e) {
+  throw new RuntimeException("Failed to read measurement metadata: " + _e.getMessage());
+}
+
+int featuresKeyIdx = raw.indexOf("\"features\"");
+if (featuresKeyIdx < 0) throw new RuntimeException("Could not find sidecar key: features");
+int featuresArrStart = raw.indexOf("[", featuresKeyIdx);
+if (featuresArrStart < 0) throw new RuntimeException("Could not find array start for key: features");
+
+int featuresDepth = 0;
+int featuresArrEnd = -1;
+for (int hi = featuresArrStart; hi < raw.length(); hi++) {
+  char hc = raw.charAt(hi);
+  if (hc == '[') featuresDepth++;
+  else if (hc == ']') {
+    featuresDepth--;
+    if (featuresDepth == 0) {
+      featuresArrEnd = hi;
+      break;
+    }
+  }
+}
+if (featuresArrEnd < 0) throw new RuntimeException("Could not find array end for key: features");
+String featuresArrayBody = raw.substring(featuresArrStart + 1, featuresArrEnd);
+
+java.util.List featureObjects = new java.util.ArrayList();
+{
+  int soDepth = 0;
+  int soStart = -1;
+  boolean soInStr = false;
+  boolean soEsc = false;
+  for (int si = 0; si < featuresArrayBody.length(); si++) {
+    char sc = featuresArrayBody.charAt(si);
+    if (soEsc) { soEsc = false; continue; }
+    if (sc == '\\') { soEsc = true; continue; }
+    if (sc == '"') { soInStr = !soInStr; continue; }
+    if (soInStr) continue;
+    if (sc == '{') {
+      if (soDepth == 0) soStart = si;
+      soDepth++;
+    } else if (sc == '}') {
+      soDepth--;
+      if (soDepth == 0 && soStart >= 0) {
+        featureObjects.add(featuresArrayBody.substring(soStart, si + 1));
+        soStart = -1;
+      }
+    }
+  }
+}
+
+java.util.List featureIds = new java.util.ArrayList();
+java.util.List featureClasses = new java.util.ArrayList();
+java.util.List zones = new java.util.ArrayList();
+java.util.List geometryTypes = new java.util.ArrayList();
+java.util.List centerXmm = new java.util.ArrayList();
+java.util.List centerYmm = new java.util.ArrayList();
+java.util.List centerZmm = new java.util.ArrayList();
+java.util.List normalX = new java.util.ArrayList();
+java.util.List normalY = new java.util.ArrayList();
+java.util.List normalZ = new java.util.ArrayList();
+java.util.List radiusMm = new java.util.ArrayList();
+java.util.List innerRadiusMm = new java.util.ArrayList();
+java.util.List outerRadiusMm = new java.util.ArrayList();
+java.util.List xHalfWidthMm = new java.util.ArrayList();
+java.util.List zHalfWidthMm = new java.util.ArrayList();
+java.util.List axialXmm = new java.util.ArrayList();
+java.util.List parentFeatures = new java.util.ArrayList();
+java.util.List sourceTypes = new java.util.ArrayList();
+java.util.List selectionTags = new java.util.ArrayList();
+java.util.List openLengthsMm = new java.util.ArrayList();
+
+for (int oi = 0; oi < featureObjects.size(); oi++) {
+  String obj = (String) featureObjects.get(oi);
+
+  java.util.regex.Matcher idMatcher = java.util.regex.Pattern.compile(
+    "\"feature_id\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (!idMatcher.find()) throw new RuntimeException("Missing feature_id in feature object");
+  featureIds.add(idMatcher.group(1));
+
+  java.util.regex.Matcher classMatcher = java.util.regex.Pattern.compile(
+    "\"feature_class\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (!classMatcher.find()) throw new RuntimeException("Missing feature_class in feature object");
+  featureClasses.add(classMatcher.group(1));
+
+  java.util.regex.Matcher zoneMatcher = java.util.regex.Pattern.compile(
+    "\"zone\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (!zoneMatcher.find()) throw new RuntimeException("Missing zone in feature object");
+  zones.add(zoneMatcher.group(1));
+
+  java.util.regex.Matcher geomMatcher = java.util.regex.Pattern.compile(
+    "\"geometry_type\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (!geomMatcher.find()) throw new RuntimeException("Missing geometry_type in feature object");
+  geometryTypes.add(geomMatcher.group(1));
+
+  String centerRaw = null;
+  java.util.regex.Matcher centerMatcher = java.util.regex.Pattern.compile(
+    "\"center_mm\"\\s*:\\s*\\[([^\\]]*)\\]", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (centerMatcher.find()) centerRaw = centerMatcher.group(1);
+
+  String normalRaw = null;
+  java.util.regex.Matcher normalMatcher = java.util.regex.Pattern.compile(
+    "\"normal\"\\s*:\\s*\\[([^\\]]*)\\]", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (normalMatcher.find()) normalRaw = normalMatcher.group(1);
+
+  if (centerRaw != null) {
+    String[] cParts = centerRaw.split(",");
+    centerXmm.add(Double.valueOf(Double.parseDouble(cParts[0].trim())));
+    centerYmm.add(Double.valueOf(Double.parseDouble(cParts[1].trim())));
+    centerZmm.add(Double.valueOf(Double.parseDouble(cParts[2].trim())));
+  } else {
+    centerXmm.add(Double.valueOf(Double.NaN));
+    centerYmm.add(Double.valueOf(Double.NaN));
+    centerZmm.add(Double.valueOf(Double.NaN));
+  }
+
+  if (normalRaw != null) {
+    String[] nParts = normalRaw.split(",");
+    normalX.add(Double.valueOf(Double.parseDouble(nParts[0].trim())));
+    normalY.add(Double.valueOf(Double.parseDouble(nParts[1].trim())));
+    normalZ.add(Double.valueOf(Double.parseDouble(nParts[2].trim())));
+  } else {
+    normalX.add(Double.valueOf(Double.NaN));
+    normalY.add(Double.valueOf(Double.NaN));
+    normalZ.add(Double.valueOf(Double.NaN));
+  }
+
+  double radiusVal = Double.NaN;
+  java.util.regex.Matcher radiusMatcher = java.util.regex.Pattern.compile(
+    "\"radius_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (radiusMatcher.find()) radiusVal = Double.parseDouble(radiusMatcher.group(1));
+  radiusMm.add(Double.valueOf(radiusVal));
+
+  double innerVal = Double.NaN;
+  java.util.regex.Matcher innerMatcher = java.util.regex.Pattern.compile(
+    "\"inner_radius_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (innerMatcher.find()) innerVal = Double.parseDouble(innerMatcher.group(1));
+  innerRadiusMm.add(Double.valueOf(innerVal));
+
+  double outerVal = Double.NaN;
+  java.util.regex.Matcher outerMatcher = java.util.regex.Pattern.compile(
+    "\"outer_radius_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (outerMatcher.find()) outerVal = Double.parseDouble(outerMatcher.group(1));
+  outerRadiusMm.add(Double.valueOf(outerVal));
+
+  double xHalfVal = Double.NaN;
+  java.util.regex.Matcher xHalfMatcher = java.util.regex.Pattern.compile(
+    "\"x_half_width_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (xHalfMatcher.find()) xHalfVal = Double.parseDouble(xHalfMatcher.group(1));
+  xHalfWidthMm.add(Double.valueOf(xHalfVal));
+
+  double zHalfVal = Double.NaN;
+  java.util.regex.Matcher zHalfMatcher = java.util.regex.Pattern.compile(
+    "\"z_half_width_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (zHalfMatcher.find()) zHalfVal = Double.parseDouble(zHalfMatcher.group(1));
+  zHalfWidthMm.add(Double.valueOf(zHalfVal));
+
+  double axialVal = Double.NaN;
+  java.util.regex.Matcher axialMatcher = java.util.regex.Pattern.compile(
+    "\"axial_x_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (axialMatcher.find()) axialVal = Double.parseDouble(axialMatcher.group(1));
+  axialXmm.add(Double.valueOf(axialVal));
+
+  String parentVal = "";
+  java.util.regex.Matcher parentMatcher = java.util.regex.Pattern.compile(
+    "\"parent_feature\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (parentMatcher.find()) parentVal = parentMatcher.group(1);
+  parentFeatures.add(parentVal);
+
+  String sourceTypeVal = "";
+  java.util.regex.Matcher sourceTypeMatcher = java.util.regex.Pattern.compile(
+    "\"source_type\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (sourceTypeMatcher.find()) sourceTypeVal = sourceTypeMatcher.group(1);
+  sourceTypes.add(sourceTypeVal);
+
+  String selectionVal = "";
+  java.util.regex.Matcher selectionMatcher = java.util.regex.Pattern.compile(
+    "\"selection_tag\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (selectionMatcher.find()) selectionVal = selectionMatcher.group(1);
+  selectionTags.add(selectionVal);
+
+  double openLenVal = Double.NaN;
+  java.util.regex.Matcher openLenMatcher = java.util.regex.Pattern.compile(
+    "\"open_length_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(obj);
+  if (openLenMatcher.find()) openLenVal = Double.parseDouble(openLenMatcher.group(1));
+  openLengthsMm.add(Double.valueOf(openLenVal));
+}
+
+int nFeatures = featureIds.size();
+if (nFeatures == 0) {
+  throw new RuntimeException("No features found in meters sidecar: " + metersPath.toString());
+}
+
+String inletSelectionTag = null;
+String outletSelectionTag = null;
+for (int i = 0; i < nFeatures; i++) {
+  String featureId = (String) featureIds.get(i);
+  String featureClass = (String) featureClasses.get(i);
+  String selectionTag = (String) selectionTags.get(i);
+  if (!"pressure_ref".equals(featureClass)) {
+    continue;
+  }
+  if ("sec_inlet_ref".equals(featureId) && selectionTag != null && selectionTag.trim().length() > 0) {
+    inletSelectionTag = selectionTag.trim();
+  }
+  if ("sec_outlet_ref".equals(featureId) && selectionTag != null && selectionTag.trim().length() > 0) {
+    outletSelectionTag = selectionTag.trim();
+  }
+}
+
+if (inletSelectionTag == null || inletSelectionTag.length() == 0) {
+  throw new RuntimeException(
+    "Missing pressure_ref selection tag for sec_inlet_ref in measurement metadata: " + metersPath.toString()
+  );
+}
+if (outletSelectionTag == null || outletSelectionTag.length() == 0) {
+  throw new RuntimeException(
+    "Missing pressure_ref selection tag for sec_outlet_ref in measurement metadata: " + metersPath.toString()
+  );
+}
+
+boolean inletSelectionExists = false;
+boolean outletSelectionExists = false;
+String inletSelectionComponentTag = "";
+String outletSelectionComponentTag = "";
+String inletResolvedSelectionTag = null;
+String outletResolvedSelectionTag = null;
+try {
+  String[] componentTags = model.component().tags();
+  for (int ci = 0; ci < componentTags.length; ci++) {
+    String compTag = componentTags[ci];
+    String[] selTags = null;
+    try {
+      selTags = model.component(compTag).selection().tags();
+    } catch (Exception _ignore) {}
+    if (selTags == null) {
+      continue;
+    }
+    for (int si = 0; si < selTags.length; si++) {
+      String selTag = selTags[si];
+      String selLabel = "";
+      try {
+        selLabel = model.component(compTag).selection(selTag).label();
+      } catch (Exception _ignore) {}
+
+      if (!inletSelectionExists && inletSelectionTag.equals(selTag)) {
+        inletSelectionExists = true;
+        inletSelectionComponentTag = compTag;
+        inletResolvedSelectionTag = selTag;
+      }
+      if (!outletSelectionExists && outletSelectionTag.equals(selTag)) {
+        outletSelectionExists = true;
+        outletSelectionComponentTag = compTag;
+        outletResolvedSelectionTag = selTag;
+      }
+
+      if (!inletSelectionExists && inletSelectionTag.equals(selLabel)) {
+        if (inletResolvedSelectionTag != null && !inletResolvedSelectionTag.equals(selTag)) {
+          throw new RuntimeException(
+            "Ambiguous pressure_ref selection label '" + inletSelectionTag
+            + "' for sec_inlet_ref. Matching internal tags include '"
+            + inletResolvedSelectionTag + "' and '" + selTag + "'."
+          );
+        }
+        inletSelectionExists = true;
+        inletSelectionComponentTag = compTag;
+        inletResolvedSelectionTag = selTag;
+      }
+      if (!outletSelectionExists && outletSelectionTag.equals(selLabel)) {
+        if (outletResolvedSelectionTag != null && !outletResolvedSelectionTag.equals(selTag)) {
+          throw new RuntimeException(
+            "Ambiguous pressure_ref selection label '" + outletSelectionTag
+            + "' for sec_outlet_ref. Matching internal tags include '"
+            + outletResolvedSelectionTag + "' and '" + selTag + "'."
+          );
+        }
+        outletSelectionExists = true;
+        outletSelectionComponentTag = compTag;
+        outletResolvedSelectionTag = selTag;
+      }
+    }
+  }
+} catch (RuntimeException _runtime) {
+  throw _runtime;
+} catch (Exception _ignore) {}
+
+if (!inletSelectionExists) {
+  throw new RuntimeException(
+    "Missing required named selection '" + inletSelectionTag
+    + "' referenced by sec_inlet_ref. Build or rename that selection in the baseline template before running BuildFluxExtractionLayer."
+  );
+}
+if (!outletSelectionExists) {
+  throw new RuntimeException(
+    "Missing required named selection '" + outletSelectionTag
+    + "' referenced by sec_outlet_ref. Build or rename that selection in the baseline template before running BuildFluxExtractionLayer."
+  );
+}
+
+if (inletResolvedSelectionTag == null || inletResolvedSelectionTag.length() == 0) {
+  inletResolvedSelectionTag = inletSelectionTag;
+}
+if (outletResolvedSelectionTag == null || outletResolvedSelectionTag.length() == 0) {
+  outletResolvedSelectionTag = outletSelectionTag;
+}
+
+java.lang.System.out.println(
+  "BuildFluxExtractionLayer: resolved sec_inlet_ref selection '" + inletSelectionTag
+  + "' to internal tag '" + inletResolvedSelectionTag + "' on component '" + inletSelectionComponentTag + "'."
+);
+java.lang.System.out.println(
+  "BuildFluxExtractionLayer: resolved sec_outlet_ref selection '" + outletSelectionTag
+  + "' to internal tag '" + outletResolvedSelectionTag + "' on component '" + outletSelectionComponentTag + "'."
+);
+
+String[] cpTags = new String[nFeatures];
+String[] signedTags = new String[nFeatures];
+String[] absTags = new String[nFeatures];
+
+for (int i = 0; i < nFeatures; i++) {
+  String fid = (String) featureIds.get(i);
+  cpTags[i] = "CP_flux_" + fid;
+  signedTags[i] = "DV_flux_" + fid + "_signed";
+  absTags[i] = "DV_flux_" + fid + "_abs";
+}
+
+try {
+  String[] dsTags = model.result().dataset().tags();
+  for (int i = 0; i < dsTags.length; i++) {
+    if (dsTags[i].startsWith(MANAGED_DATASET_PREFIX)) {
+      model.result().dataset().remove(dsTags[i]);
+    }
+  }
+} catch (Exception _ignore) {}
+
+try {
+  String[] numTags = model.result().numerical().tags();
+  for (int i = 0; i < numTags.length; i++) {
+    if (numTags[i].startsWith(MANAGED_NUMERICAL_PREFIX)) {
+      model.result().numerical().remove(numTags[i]);
+    }
+  }
+} catch (Exception _ignore) {}
+
+String solutionDatasetTag = null;
+{
+  String[] dsCheckTags = model.result().dataset().tags();
+  String[] preferred = new String[] { DEFAULT_SOLUTION_DATASET_TAG, FALLBACK_SOLUTION_DATASET_TAG };
+  for (int pi = 0; pi < preferred.length && solutionDatasetTag == null; pi++) {
+    for (int di = 0; di < dsCheckTags.length; di++) {
+      if (preferred[pi].equals(dsCheckTags[di])) {
+        try {
+          if ("Solution".equals(model.result().dataset(dsCheckTags[di]).getType())) {
+            solutionDatasetTag = preferred[pi];
+          }
+        } catch (Exception _ignore) {}
+        break;
+      }
+    }
+  }
+  if (solutionDatasetTag == null) {
+    for (int di = 0; di < dsCheckTags.length; di++) {
+      try {
+        if ("Solution".equals(model.result().dataset(dsCheckTags[di]).getType())) {
+          solutionDatasetTag = dsCheckTags[di];
+          break;
+        }
+      } catch (Exception _ignore) {}
+    }
+  }
+  if (solutionDatasetTag == null) {
+    throw new RuntimeException("Could not find a compatible solution dataset.");
+  }
+}
+
+String solutionTag = FALLBACK_SOLUTION_TAG;
+try {
+  String solRef = model.result().dataset(solutionDatasetTag).getString("solution");
+  if (solRef != null && solRef.trim().length() > 0) solutionTag = solRef.trim();
+} catch (Exception _ignore) {}
+
+java.lang.System.out.println(
+  "BuildFluxExtractionLayer: using solution dataset '" + solutionDatasetTag
+  + "' and solution '" + solutionTag + "'."
+);
+
+for (int i = 0; i < nFeatures; i++) {
+  String geometryType = (String) geometryTypes.get(i);
+  String featureClass = (String) featureClasses.get(i);
+
+  if ("named_selection".equals(geometryType)) {
+    continue;
+  }
+
+  String mmCx = String.format(java.util.Locale.US, "%.9f[mm]", ((Double) centerXmm.get(i)).doubleValue());
+  String mmCy = String.format(java.util.Locale.US, "%.9f[mm]", ((Double) centerYmm.get(i)).doubleValue());
+  String mmCz = String.format(java.util.Locale.US, "%.9f[mm]", ((Double) centerZmm.get(i)).doubleValue());
+  String sNx = String.format(java.util.Locale.US, "%.12f", ((Double) normalX.get(i)).doubleValue());
+  String sNy = String.format(java.util.Locale.US, "%.12f", ((Double) normalY.get(i)).doubleValue());
+  String sNz = String.format(java.util.Locale.US, "%.12f", ((Double) normalZ.get(i)).doubleValue());
+
+  model.result().dataset().create(cpTags[i], "CutPlane");
+  model.result().dataset(cpTags[i]).label("Flux cut plane: " + (String) featureIds.get(i));
+  model.result().dataset(cpTags[i]).set("data", solutionDatasetTag);
+  model.result().dataset(cpTags[i]).set("planetype", "general");
+  model.result().dataset(cpTags[i]).set("genmethod", "pointnormal");
+  model.result().dataset(cpTags[i]).set("genpnpoint", new String[] { mmCx, mmCy, mmCz });
+  model.result().dataset(cpTags[i]).set("genpnvec", new String[] { sNx, sNy, sNz });
+
+  String signedExpr = null;
+  String absExpr = null;
+  String planeFluxExpr = String.format(
+    java.util.Locale.US,
+    "6e7*((%s)*(u)+(%s)*(v)+(%s)*(w))",
+    sNx, sNy, sNz
+  );
+  String planeFluxAbsExpr = "6e7*abs(((" + sNx + ")*(u))+((" + sNy + ")*(v))+((" + sNz + ")*(w)))";
+
+  if ("cutplane_disk".equals(geometryType)) {
+    String mmRadius = String.format(java.util.Locale.US, "%.9f[mm]", ((Double) radiusMm.get(i)).doubleValue());
+    String maskExpr = String.format(
+      java.util.Locale.US,
+      "if((x-(%s))^2 + (y-(%s))^2 + (z-(%s))^2 <= (%s)^2, 1, 0)",
+      mmCx, mmCy, mmCz, mmRadius
+    );
+    signedExpr = "(" + planeFluxExpr + ")*(" + maskExpr + ")";
+    absExpr = "(" + planeFluxAbsExpr + ")*(" + maskExpr + ")";
+  } else if ("cutplane_annulus".equals(geometryType)) {
+    String mmInner = String.format(java.util.Locale.US, "%.9f[mm]", ((Double) innerRadiusMm.get(i)).doubleValue());
+    String mmOuter = String.format(java.util.Locale.US, "%.9f[mm]", ((Double) outerRadiusMm.get(i)).doubleValue());
+    String maskExpr = String.format(
+      java.util.Locale.US,
+      "if((((y-(%s))^2 + (z-(%s))^2) >= (%s)^2) && (((y-(%s))^2 + (z-(%s))^2) <= (%s)^2), 1, 0)",
+      mmCy, mmCz, mmInner, mmCy, mmCz, mmOuter
+    );
+    signedExpr = "(" + planeFluxExpr + ")*(" + maskExpr + ")";
+    absExpr = "(" + planeFluxAbsExpr + ")*(" + maskExpr + ")";
+  } else if ("cutplane_rect".equals(geometryType)) {
+    String mmHalfX = String.format(java.util.Locale.US, "%.9f[mm]", ((Double) xHalfWidthMm.get(i)).doubleValue());
+    String mmHalfZ = String.format(java.util.Locale.US, "%.9f[mm]", ((Double) zHalfWidthMm.get(i)).doubleValue());
+    String maskExpr = String.format(
+      java.util.Locale.US,
+      "if((abs(x-(%s)) <= (%s)) && (abs(z-(%s)) <= (%s)), 1, 0)",
+      mmCx, mmHalfX, mmCz, mmHalfZ
+    );
+    signedExpr = "(" + planeFluxExpr + ")*(" + maskExpr + ")";
+    absExpr = "(" + planeFluxAbsExpr + ")*(" + maskExpr + ")";
+  } else {
+    throw new RuntimeException("Unsupported geometry_type in meters sidecar: " + geometryType);
+  }
+
+  model.result().numerical().create(signedTags[i], "IntSurface");
+  model.result().numerical(signedTags[i]).label("Signed flux: " + (String) featureIds.get(i));
+  model.result().numerical(signedTags[i]).set("data", cpTags[i]);
+  model.result().numerical(signedTags[i]).set("expr", new String[] { signedExpr });
+  model.result().numerical(signedTags[i]).set("unit", new String[] { "mL/min" });
+  model.result().numerical(signedTags[i]).set("descr", new String[] { "Signed flux" });
+
+  model.result().numerical().create(absTags[i], "IntSurface");
+  model.result().numerical(absTags[i]).label("Absolute flux: " + (String) featureIds.get(i));
+  model.result().numerical(absTags[i]).set("data", cpTags[i]);
+  model.result().numerical(absTags[i]).set("expr", new String[] { absExpr });
+  model.result().numerical(absTags[i]).set("unit", new String[] { "mL/min" });
+  model.result().numerical(absTags[i]).set("descr", new String[] { "Absolute flux" });
+}
+
+String TAG_Q_IN = "DV_flux_global_q_in";
+String TAG_Q_OUT = "DV_flux_global_q_out";
+String TAG_P_IN = "DV_flux_global_p_in_avg";
+String TAG_P_OUT = "DV_flux_global_p_out_avg";
+String TAG_VEL_MAX = "DV_flux_global_max_vel";
+String TAG_P_MAX = "DV_flux_global_max_p";
+String TAG_P_MIN = "DV_flux_global_min_p";
+
+model.result().numerical().create(TAG_Q_IN, "IntSurface");
+model.result().numerical(TAG_Q_IN).selection().named(inletResolvedSelectionTag);
+model.result().numerical(TAG_Q_IN).set("data", solutionDatasetTag);
+model.result().numerical(TAG_Q_IN).set("expr", new String[] { FLOW_EXPR });
+model.result().numerical(TAG_Q_IN).set("unit", new String[] { "mL/min" });
+
+model.result().numerical().create(TAG_Q_OUT, "IntSurface");
+model.result().numerical(TAG_Q_OUT).selection().named(outletResolvedSelectionTag);
+model.result().numerical(TAG_Q_OUT).set("data", solutionDatasetTag);
+model.result().numerical(TAG_Q_OUT).set("expr", new String[] { FLOW_EXPR });
+model.result().numerical(TAG_Q_OUT).set("unit", new String[] { "mL/min" });
+
+model.result().numerical().create(TAG_P_IN, "AvSurface");
+model.result().numerical(TAG_P_IN).selection().named(inletResolvedSelectionTag);
+model.result().numerical(TAG_P_IN).set("data", solutionDatasetTag);
+model.result().numerical(TAG_P_IN).set("expr", new String[] { "p" });
+model.result().numerical(TAG_P_IN).set("unit", new String[] { "Pa" });
+
+model.result().numerical().create(TAG_P_OUT, "AvSurface");
+model.result().numerical(TAG_P_OUT).selection().named(outletResolvedSelectionTag);
+model.result().numerical(TAG_P_OUT).set("data", solutionDatasetTag);
+model.result().numerical(TAG_P_OUT).set("expr", new String[] { "p" });
+model.result().numerical(TAG_P_OUT).set("unit", new String[] { "Pa" });
+
+model.result().numerical().create(TAG_VEL_MAX, "MaxVolume");
+model.result().numerical(TAG_VEL_MAX).selection().all();
+model.result().numerical(TAG_VEL_MAX).set("data", solutionDatasetTag);
+model.result().numerical(TAG_VEL_MAX).set("expr", new String[] { VEL_MAG_EXPR });
+model.result().numerical(TAG_VEL_MAX).set("unit", new String[] { "m/s" });
+
+model.result().numerical().create(TAG_P_MAX, "MaxVolume");
+model.result().numerical(TAG_P_MAX).selection().all();
+model.result().numerical(TAG_P_MAX).set("data", solutionDatasetTag);
+model.result().numerical(TAG_P_MAX).set("expr", new String[] { "p" });
+model.result().numerical(TAG_P_MAX).set("unit", new String[] { "Pa" });
+
+model.result().numerical().create(TAG_P_MIN, "MinVolume");
+model.result().numerical(TAG_P_MIN).selection().all();
+model.result().numerical(TAG_P_MIN).set("data", solutionDatasetTag);
+model.result().numerical(TAG_P_MIN).set("expr", new String[] { "p" });
+model.result().numerical(TAG_P_MIN).set("unit", new String[] { "Pa" });
+
+com.comsol.model.SolutionInfo solInfo = null;
+int[] outerSolnums = null;
+boolean useColumnFallback = false;
+int fallbackSnapshotCount = 1;
+double[][] fallbackProbeVals = null;
+try {
+  solInfo = model.sol(solutionTag).getSolutioninfo();
+  outerSolnums = solInfo.getOuterSolnum();
+} catch (Exception _ignore) {}
+if (outerSolnums == null || outerSolnums.length == 0) {
+  useColumnFallback = true;
+  try {
+    fallbackProbeVals = model.result().numerical(TAG_Q_OUT).getReal();
+  } catch (Exception _ignore) {}
+  if (fallbackProbeVals == null || fallbackProbeVals.length == 0 || fallbackProbeVals[0] == null || fallbackProbeVals[0].length == 0) {
+    try {
+      fallbackProbeVals = model.result().numerical(TAG_Q_IN).getReal();
+    } catch (Exception _ignore) {}
+  }
+  if ((fallbackProbeVals == null || fallbackProbeVals.length == 0 || fallbackProbeVals[0] == null || fallbackProbeVals[0].length == 0) && signedTags.length > 0) {
+    try {
+      fallbackProbeVals = model.result().numerical(signedTags[0]).getReal();
+    } catch (Exception _ignore) {}
+  }
+  if (fallbackProbeVals != null && fallbackProbeVals.length > 0 && fallbackProbeVals[0] != null && fallbackProbeVals[0].length > 0) {
+    fallbackSnapshotCount = fallbackProbeVals[0].length;
+  }
+  outerSolnums = new int[] { 0 };
+}
+
+if (useColumnFallback) {
+  java.lang.System.out.println(
+    "BuildFluxExtractionLayer: outer solution enumeration unavailable; falling back to "
+    + fallbackSnapshotCount + " snapshot column(s) from numerical getReal()."
+  );
+  if (fallbackProbeVals != null && fallbackProbeVals.length > 0 && fallbackProbeVals[0] != null) {
+    java.lang.System.out.println(
+      "BuildFluxExtractionLayer: fallback probe matrix shape rows=" + fallbackProbeVals.length
+      + " cols=" + fallbackProbeVals[0].length + "."
+    );
+  }
+} else {
+  java.lang.System.out.println(
+    "BuildFluxExtractionLayer: discovered outer solution numbers "
+    + java.util.Arrays.toString(outerSolnums) + "."
+  );
+}
+
+StringBuilder scalarCsv = new StringBuilder();
+scalarCsv.append("design_id,p_ramp,Q_in_ml_min,Q_out_ml_min,p_in_avg_Pa,p_out_avg_Pa,Q_lumen_out_ml_min,Q_annulus_out_ml_min,max_vel_m_s,max_p_Pa,min_p_Pa,required_eval_status,required_eval_error,debug_method_version,debug_solution_dataset,debug_solution_tag,debug_use_column_fallback,debug_snapshot_count,debug_snapshot_index\n");
+
+StringBuilder featureCsv = new StringBuilder();
+featureCsv.append("design_id,p_ramp,feature_id,feature_class,zone,parent_feature,source_type,axial_x_mm,open_length_mm,signed_flux_ml_min,abs_flux_ml_min,eval_status,eval_error,debug_method_version,debug_solution_dataset,debug_solution_tag,debug_use_column_fallback,debug_snapshot_count,debug_snapshot_index\n");
+
+boolean hadEvaluationFailure = false;
+String firstEvaluationFailure = "";
+
+int snapshotCount = useColumnFallback ? fallbackSnapshotCount : outerSolnums.length;
+for (int si = 0; si < snapshotCount; si++) {
+  int outerSolnum = useColumnFallback ? 0 : outerSolnums[si];
+  int columnIndex = useColumnFallback ? si : 0;
+  Double pRamp = null;
+
+  if (!useColumnFallback && solInfo != null) {
+    try {
+      int[] innerSolnums = solInfo.getSolnum(outerSolnum, false);
+      int innerSolnum = 1;
+      if (innerSolnums != null && innerSolnums.length > 0 && innerSolnums[0] > 0) innerSolnum = innerSolnums[0];
+      int[][] solnums = new int[][] { new int[] { outerSolnum, innerSolnum } };
+      String[][] pnames = solInfo.getPNames(solnums);
+      double[][] pvals = solInfo.getPvals(solnums);
+      if (pnames != null && pvals != null && pnames.length > 0 && pvals.length > 0) {
+        for (int pi = 0; pi < pnames[0].length; pi++) {
+          if ("p_ramp".equals(pnames[0][pi])) {
+            pRamp = Double.valueOf(pvals[0][pi]);
+            break;
+          }
+        }
+      }
+    } catch (Exception _ignore) {}
+  }
+
+  double qInVal = Double.NaN;
+  double qOutVal = Double.NaN;
+  double pInVal = Double.NaN;
+  double pOutVal = Double.NaN;
+  double qLumenVal = Double.NaN;
+  double qAnnulusVal = Double.NaN;
+  double maxVelVal = Double.NaN;
+  double maxPVal = Double.NaN;
+  double minPVal = Double.NaN;
+  boolean snapshotEvalFailure = false;
+  String snapshotEvalStatus = "ok";
+  String snapshotEvalError = "";
+
+  try {
+    double[][] vals = useColumnFallback ? model.result().numerical(TAG_Q_IN).getReal() : (outerSolnum > 0 ? model.result().numerical(TAG_Q_IN).getReal(outerSolnum) : model.result().numerical(TAG_Q_IN).getReal());
+    if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) qInVal = vals[0][columnIndex];
+  } catch (Exception _ignore) {}
+  try {
+    double[][] vals = useColumnFallback ? model.result().numerical(TAG_Q_OUT).getReal() : (outerSolnum > 0 ? model.result().numerical(TAG_Q_OUT).getReal(outerSolnum) : model.result().numerical(TAG_Q_OUT).getReal());
+    if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) qOutVal = vals[0][columnIndex];
+  } catch (Exception _ignore) {}
+  try {
+    double[][] vals = useColumnFallback ? model.result().numerical(TAG_P_IN).getReal() : (outerSolnum > 0 ? model.result().numerical(TAG_P_IN).getReal(outerSolnum) : model.result().numerical(TAG_P_IN).getReal());
+    if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) pInVal = vals[0][columnIndex];
+  } catch (Exception _ignore) {}
+  try {
+    double[][] vals = useColumnFallback ? model.result().numerical(TAG_P_OUT).getReal() : (outerSolnum > 0 ? model.result().numerical(TAG_P_OUT).getReal(outerSolnum) : model.result().numerical(TAG_P_OUT).getReal());
+    if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) pOutVal = vals[0][columnIndex];
+  } catch (Exception _ignore) {}
+  try {
+    double[][] vals = useColumnFallback ? model.result().numerical(TAG_VEL_MAX).getReal() : (outerSolnum > 0 ? model.result().numerical(TAG_VEL_MAX).getReal(outerSolnum) : model.result().numerical(TAG_VEL_MAX).getReal());
+    if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) maxVelVal = vals[0][columnIndex];
+  } catch (Exception _ignore) {}
+  try {
+    double[][] vals = useColumnFallback ? model.result().numerical(TAG_P_MAX).getReal() : (outerSolnum > 0 ? model.result().numerical(TAG_P_MAX).getReal(outerSolnum) : model.result().numerical(TAG_P_MAX).getReal());
+    if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) maxPVal = vals[0][columnIndex];
+  } catch (Exception _ignore) {}
+  try {
+    double[][] vals = useColumnFallback ? model.result().numerical(TAG_P_MIN).getReal() : (outerSolnum > 0 ? model.result().numerical(TAG_P_MIN).getReal(outerSolnum) : model.result().numerical(TAG_P_MIN).getReal());
+    if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) minPVal = vals[0][columnIndex];
+  } catch (Exception _ignore) {}
+
+  if (!Double.isNaN(qOutVal) && !Double.isInfinite(qOutVal) && Math.abs(qOutVal) > 1e-12) {
+    if (!Double.isNaN(maxVelVal) && !Double.isInfinite(maxVelVal) && maxVelVal == 0.0) {
+      snapshotEvalFailure = true;
+      snapshotEvalStatus = "failed";
+      if (snapshotEvalError.length() > 0) snapshotEvalError += "|";
+      snapshotEvalError += "max_vel_zero_with_nonzero_outflow";
+    }
+    if (!Double.isNaN(maxPVal) && !Double.isInfinite(maxPVal) && !Double.isNaN(pInVal) && !Double.isInfinite(pInVal) && !Double.isNaN(pOutVal) && !Double.isInfinite(pOutVal)) {
+      double refMaxP = pInVal > pOutVal ? pInVal : pOutVal;
+      if (maxPVal + 1e-9 < refMaxP) {
+        snapshotEvalFailure = true;
+        snapshotEvalStatus = "failed";
+        if (snapshotEvalError.length() > 0) snapshotEvalError += "|";
+        snapshotEvalError += "max_p_below_boundary_refs";
+      }
+      double refMinP = pInVal < pOutVal ? pInVal : pOutVal;
+      if (!Double.isNaN(minPVal) && !Double.isInfinite(minPVal) && minPVal - 1e-9 > refMinP) {
+        snapshotEvalFailure = true;
+        snapshotEvalStatus = "failed";
+        if (snapshotEvalError.length() > 0) snapshotEvalError += "|";
+        snapshotEvalError += "min_p_above_boundary_refs";
+      }
+    }
+  }
+
+  for (int i = 0; i < nFeatures; i++) {
+    String featureClass = (String) featureClasses.get(i);
+    String geometryType = (String) geometryTypes.get(i);
+
+    if ("named_selection".equals(geometryType)) {
+      continue;
+    }
+
+    double signedVal = Double.NaN;
+    double absVal = Double.NaN;
+    String featureEvalStatus = "ok";
+    String featureEvalError = "";
+
+    try {
+      double[][] vals = useColumnFallback ? model.result().numerical(signedTags[i]).getReal() : (outerSolnum > 0 ? model.result().numerical(signedTags[i]).getReal(outerSolnum) : model.result().numerical(signedTags[i]).getReal());
+      if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) {
+        signedVal = vals[0][columnIndex];
+      } else {
+        featureEvalStatus = "empty_signed_eval";
+        featureEvalError = "signed_getReal_empty";
+      }
+    } catch (Exception _exc) {
+      featureEvalStatus = "signed_eval_exception";
+      featureEvalError = "signed_exception_" + String.valueOf(_exc.getMessage()).replace(",", ";").replace("\n", " ").replace("\"", "'");
+    }
+    try {
+      double[][] vals = useColumnFallback ? model.result().numerical(absTags[i]).getReal() : (outerSolnum > 0 ? model.result().numerical(absTags[i]).getReal(outerSolnum) : model.result().numerical(absTags[i]).getReal());
+      if (vals != null && vals.length > 0 && vals[0] != null && vals[0].length > columnIndex) {
+        absVal = vals[0][columnIndex];
+      } else {
+        if ("ok".equals(featureEvalStatus)) featureEvalStatus = "empty_abs_eval";
+        else featureEvalStatus = "partial_eval_failure";
+        if (featureEvalError.length() > 0) featureEvalError += "|";
+        featureEvalError += "abs_getReal_empty";
+      }
+    } catch (Exception _exc) {
+      if ("ok".equals(featureEvalStatus)) featureEvalStatus = "abs_eval_exception";
+      else featureEvalStatus = "partial_eval_failure";
+      if (featureEvalError.length() > 0) featureEvalError += "|";
+      featureEvalError += "abs_exception_" + String.valueOf(_exc.getMessage()).replace(",", ";").replace("\n", " ").replace("\"", "'");
+    }
+
+    if (Double.isNaN(signedVal) || Double.isInfinite(signedVal)) {
+      if ("ok".equals(featureEvalStatus)) featureEvalStatus = "invalid_signed_value";
+      else featureEvalStatus = "partial_eval_failure";
+      if (featureEvalError.length() > 0) featureEvalError += "|";
+      featureEvalError += "signed_nan_or_inf";
+    }
+    if (Double.isNaN(absVal) || Double.isInfinite(absVal)) {
+      if ("ok".equals(featureEvalStatus)) featureEvalStatus = "invalid_abs_value";
+      else featureEvalStatus = "partial_eval_failure";
+      if (featureEvalError.length() > 0) featureEvalError += "|";
+      featureEvalError += "abs_nan_or_inf";
+    }
+
+    if (!"ok".equals(featureEvalStatus)) {
+      snapshotEvalFailure = true;
+      snapshotEvalStatus = "failed";
+      if (snapshotEvalError.length() > 0) snapshotEvalError += "|";
+      snapshotEvalError += ((String) featureIds.get(i)) + ":" + featureEvalStatus;
+      java.lang.System.out.println(
+        "BuildFluxExtractionLayer: feature evaluation failed for " + (String) featureIds.get(i)
+        + " status=" + featureEvalStatus + " error=" + featureEvalError
+      );
+    }
+
+    if ("sec_distal_lumen".equals((String) featureIds.get(i))) qLumenVal = signedVal;
+    if ("sec_distal_annulus".equals((String) featureIds.get(i))) qAnnulusVal = signedVal;
+
+    featureCsv.append(designIdLocal).append(",");
+    if (pRamp != null && !pRamp.isNaN() && !pRamp.isInfinite()) featureCsv.append(String.format(java.util.Locale.US, "%.12e", pRamp.doubleValue()));
+    featureCsv.append(",");
+    featureCsv.append((String) featureIds.get(i)).append(",");
+    featureCsv.append(featureClass).append(",");
+    featureCsv.append((String) zones.get(i)).append(",");
+    featureCsv.append((String) parentFeatures.get(i)).append(",");
+    featureCsv.append((String) sourceTypes.get(i)).append(",");
+    double axialVal = ((Double) axialXmm.get(i)).doubleValue();
+    if (!Double.isNaN(axialVal) && !Double.isInfinite(axialVal)) featureCsv.append(String.format(java.util.Locale.US, "%.12e", axialVal));
+    featureCsv.append(",");
+    double openLenVal = ((Double) openLengthsMm.get(i)).doubleValue();
+    if (!Double.isNaN(openLenVal) && !Double.isInfinite(openLenVal)) featureCsv.append(String.format(java.util.Locale.US, "%.12e", openLenVal));
+    featureCsv.append(",");
+    if (!Double.isNaN(signedVal) && !Double.isInfinite(signedVal)) featureCsv.append(String.format(java.util.Locale.US, "%.12e", signedVal));
+    featureCsv.append(",");
+    if (!Double.isNaN(absVal) && !Double.isInfinite(absVal)) featureCsv.append(String.format(java.util.Locale.US, "%.12e", absVal));
+    featureCsv.append(",");
+    featureCsv.append(featureEvalStatus.replace(",", ";").replace("\"", "'"));
+    featureCsv.append(",");
+    featureCsv.append(featureEvalError.replace(",", ";").replace("\"", "'"));
+    featureCsv.append(",");
+    featureCsv.append(METHOD_DEBUG_VERSION);
+    featureCsv.append(",");
+    featureCsv.append(solutionDatasetTag.replace(",", ";").replace("\"", "'"));
+    featureCsv.append(",");
+    featureCsv.append(solutionTag.replace(",", ";").replace("\"", "'"));
+    featureCsv.append(",");
+    featureCsv.append(useColumnFallback ? "true" : "false");
+    featureCsv.append(",");
+    featureCsv.append(String.valueOf(snapshotCount));
+    featureCsv.append(",");
+    featureCsv.append(String.valueOf(columnIndex));
+    featureCsv.append("\n");
+  }
+
+  if (Double.isNaN(qLumenVal) || Double.isInfinite(qLumenVal)) {
+    snapshotEvalFailure = true;
+    snapshotEvalStatus = "failed";
+    if (snapshotEvalError.length() > 0) snapshotEvalError += "|";
+    snapshotEvalError += "missing_required_sec_distal_lumen";
+  }
+  if (Double.isNaN(qAnnulusVal) || Double.isInfinite(qAnnulusVal)) {
+    snapshotEvalFailure = true;
+    snapshotEvalStatus = "failed";
+    if (snapshotEvalError.length() > 0) snapshotEvalError += "|";
+    snapshotEvalError += "missing_required_sec_distal_annulus";
+  }
+
+  if (snapshotEvalFailure) {
+    hadEvaluationFailure = true;
+    if (firstEvaluationFailure.length() == 0) {
+      firstEvaluationFailure = snapshotEvalError;
+    }
+  }
+
+  scalarCsv.append(designIdLocal).append(",");
+  if (pRamp != null && !pRamp.isNaN() && !pRamp.isInfinite()) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", pRamp.doubleValue()));
+  scalarCsv.append(",");
+  if (!Double.isNaN(qInVal) && !Double.isInfinite(qInVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", qInVal));
+  scalarCsv.append(",");
+  if (!Double.isNaN(qOutVal) && !Double.isInfinite(qOutVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", qOutVal));
+  scalarCsv.append(",");
+  if (!Double.isNaN(pInVal) && !Double.isInfinite(pInVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", pInVal));
+  scalarCsv.append(",");
+  if (!Double.isNaN(pOutVal) && !Double.isInfinite(pOutVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", pOutVal));
+  scalarCsv.append(",");
+  if (!Double.isNaN(qLumenVal) && !Double.isInfinite(qLumenVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", qLumenVal));
+  scalarCsv.append(",");
+  if (!Double.isNaN(qAnnulusVal) && !Double.isInfinite(qAnnulusVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", qAnnulusVal));
+  scalarCsv.append(",");
+  if (!Double.isNaN(maxVelVal) && !Double.isInfinite(maxVelVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", maxVelVal));
+  scalarCsv.append(",");
+  if (!Double.isNaN(maxPVal) && !Double.isInfinite(maxPVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", maxPVal));
+  scalarCsv.append(",");
+  if (!Double.isNaN(minPVal) && !Double.isInfinite(minPVal)) scalarCsv.append(String.format(java.util.Locale.US, "%.12e", minPVal));
+  scalarCsv.append(",");
+  scalarCsv.append(snapshotEvalStatus.replace(",", ";").replace("\"", "'"));
+  scalarCsv.append(",");
+  scalarCsv.append(snapshotEvalError.replace(",", ";").replace("\"", "'"));
+  scalarCsv.append(",");
+  scalarCsv.append(METHOD_DEBUG_VERSION);
+  scalarCsv.append(",");
+  scalarCsv.append(solutionDatasetTag.replace(",", ";").replace("\"", "'"));
+  scalarCsv.append(",");
+  scalarCsv.append(solutionTag.replace(",", ";").replace("\"", "'"));
+  scalarCsv.append(",");
+  scalarCsv.append(useColumnFallback ? "true" : "false");
+  scalarCsv.append(",");
+  scalarCsv.append(String.valueOf(snapshotCount));
+  scalarCsv.append(",");
+  scalarCsv.append(String.valueOf(columnIndex));
+  scalarCsv.append("\n");
+}
+
+java.nio.file.Path scalarsPath = metersPath.resolveSibling(designIdLocal + SCALARS_SUFFIX);
+java.nio.file.Path featuresPath = metersPath.resolveSibling(designIdLocal + FEATURES_SUFFIX);
+
+try {
+  java.nio.file.Files.write(
+    scalarsPath,
+    scalarCsv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)
+  );
+  java.nio.file.Files.write(
+    featuresPath,
+    featureCsv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)
+  );
+} catch (Exception _e) {
+  throw new RuntimeException("Failed to write extraction CSVs: " + _e.getMessage());
+}
+
+if (hadEvaluationFailure) {
+  throw new RuntimeException(
+    "One or more cut-plane or required scalar evaluations were empty/invalid. "
+    + "See *_flux_features.csv and *_flux_scalars.csv status columns. First failure: " + firstEvaluationFailure
+  );
+}

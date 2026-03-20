@@ -1,0 +1,282 @@
+// ==========================================================================
+// RunManifestJob — COMSOL 6.1 master runner scaffold
+// ==========================================================================
+//
+// PURPOSE
+//   Read one row from jobs_manifest.csv and execute exactly one design without
+//   manual per-run editing in the COMSOL GUI.
+//
+// METHOD INPUTS (String unless noted)
+//   jobs_manifest_path
+//   manifest_row_index         // 1-based data row index, excluding the header
+//   run_status_log_path
+//
+// ASSUMPTIONS
+//   - The manifest already contains absolute Windows paths for:
+//       step_path
+//       holes_path
+//       measurement_metadata_path
+//       anchor_checkpoint_path
+//   - The template already has a CAD import feature, a study, a parametric
+//     sweep over p_ramp, and any warm-start-capable solver objects.
+//   - The layer builders already exist as COMSOL methods:
+//       BuildShaftHoleFluxLayer
+//       BuildCoilHoleFluxLayer
+//       BuildFluxExtractionLayer
+//
+// IMPORTANT DESIGN CHOICE
+//   Preferred: call the layer-build methods from THIS master method.
+//   Do not rely on separate static Method Call nodes for those layer builders.
+//   Static nodes hide execution order and keep design_id / path edits in the UI.
+//
+// WHAT THIS SCAFFOLD IS
+//   - a concrete method design
+//   - CSV parsing and run-contract logic you can paste into App Builder
+//   - placeholders where the exact COMSOL API tags must be matched to your
+//     model (import feature tag, study tag, solver tag, export tag names)
+//
+// WHAT STILL NEEDS LIVE VERIFICATION
+//   - exact geometry import feature tag
+//   - exact study / parametric sweep tags
+//   - exact warm-start solver API for loading checkpoint data
+//   - exact syntax for calling sibling methods in your COMSOL build
+// ==========================================================================
+
+String manifestPathLocal = null;
+String manifestRowIndexLocal = null;
+String runStatusLogPathLocal = null;
+
+try {
+  if (jobs_manifest_path != null && jobs_manifest_path.trim().length() > 0) {
+    manifestPathLocal = jobs_manifest_path.trim();
+  }
+  if (manifest_row_index != null && manifest_row_index.trim().length() > 0) {
+    manifestRowIndexLocal = manifest_row_index.trim();
+  }
+  if (run_status_log_path != null && run_status_log_path.trim().length() > 0) {
+    runStatusLogPathLocal = run_status_log_path.trim();
+  }
+} catch (Exception _ignore) {}
+
+if (manifestPathLocal == null || manifestPathLocal.length() == 0) {
+  throw new RuntimeException("jobs_manifest_path is required");
+}
+if (manifestRowIndexLocal == null || manifestRowIndexLocal.length() == 0) {
+  throw new RuntimeException("manifest_row_index is required");
+}
+if (runStatusLogPathLocal == null || runStatusLogPathLocal.length() == 0) {
+  throw new RuntimeException("run_status_log_path is required");
+}
+
+int rowIndex = -1;
+try {
+  rowIndex = Integer.parseInt(manifestRowIndexLocal);
+} catch (Exception _e) {
+  throw new RuntimeException("manifest_row_index must be an integer: " + manifestRowIndexLocal);
+}
+if (rowIndex < 1) {
+  throw new RuntimeException("manifest_row_index must be >= 1");
+}
+
+java.nio.file.Path manifestPath = java.nio.file.Paths.get(manifestPathLocal).toAbsolutePath().normalize();
+if (!java.nio.file.Files.exists(manifestPath)) {
+  throw new RuntimeException("jobs_manifest_path does not exist: " + manifestPath.toString());
+}
+java.nio.file.Path statusLogPath = java.nio.file.Paths.get(runStatusLogPathLocal).toAbsolutePath().normalize();
+
+java.util.List csvLines = null;
+try {
+  csvLines = java.nio.file.Files.readAllLines(
+    manifestPath,
+    java.nio.charset.StandardCharsets.UTF_8
+  );
+} catch (Exception _e) {
+  throw new RuntimeException("Failed to read jobs manifest: " + _e.getMessage());
+}
+
+if (csvLines.size() < 2) {
+  throw new RuntimeException("jobs_manifest.csv has no data rows");
+}
+if (rowIndex >= csvLines.size()) {
+  throw new RuntimeException("manifest_row_index out of range: " + rowIndex);
+}
+
+String headerLine = (String) csvLines.get(0);
+String dataLine = (String) csvLines.get(rowIndex);
+
+java.util.ArrayList headers = new java.util.ArrayList();
+java.util.ArrayList values = new java.util.ArrayList();
+{
+  StringBuilder token = new StringBuilder();
+  boolean inQuotes = false;
+  for (int i = 0; i < headerLine.length(); i++) {
+    char c = headerLine.charAt(i);
+    if (c == '"') inQuotes = !inQuotes;
+    else if (c == ',' && !inQuotes) {
+      headers.add(token.toString());
+      token.setLength(0);
+    } else {
+      token.append(c);
+    }
+  }
+  headers.add(token.toString());
+
+  token.setLength(0);
+  inQuotes = false;
+  for (int i = 0; i < dataLine.length(); i++) {
+    char c = dataLine.charAt(i);
+    if (c == '"') inQuotes = !inQuotes;
+    else if (c == ',' && !inQuotes) {
+      values.add(token.toString());
+      token.setLength(0);
+    } else {
+      token.append(c);
+    }
+  }
+  values.add(token.toString());
+}
+
+if (headers.size() != values.size()) {
+  throw new RuntimeException("Manifest row column mismatch at row index " + rowIndex);
+}
+
+java.util.HashMap row = new java.util.HashMap();
+for (int i = 0; i < headers.size(); i++) {
+  row.put(((String) headers.get(i)).trim(), ((String) values.get(i)).trim());
+}
+
+String designId = (String) row.get("design_id");
+String templateId = (String) row.get("template_id");
+String stepPath = (String) row.get("step_path");
+String holesPath = (String) row.get("holes_path");
+String measurementMetadataPath = (String) row.get("measurement_metadata_path");
+String scheduleType = (String) row.get("schedule_type");
+String pSchedule = (String) row.get("p_schedule");
+String startCheckpoint = (String) row.get("start_checkpoint");
+String anchorDesignId = (String) row.get("anchor_design_id");
+String anchorCheckpointPath = (String) row.get("anchor_checkpoint_path");
+
+if (designId == null || designId.length() == 0) throw new RuntimeException("design_id missing");
+if (templateId == null || templateId.length() == 0) throw new RuntimeException("template_id missing");
+if (stepPath == null || stepPath.length() == 0) throw new RuntimeException("step_path missing");
+if (holesPath == null || holesPath.length() == 0) throw new RuntimeException("holes_path missing");
+if (measurementMetadataPath == null || measurementMetadataPath.length() == 0) {
+  throw new RuntimeException("measurement_metadata_path missing");
+}
+if (pSchedule == null || pSchedule.length() == 0) throw new RuntimeException("p_schedule missing");
+
+String runState = "started";
+String runNote = "";
+
+try {
+  // ------------------------------------------------------------------------
+  // 1. Geometry / design-specific file injection
+  // ------------------------------------------------------------------------
+  //
+  // Replace "imp1" and the import property key with the exact tags from your
+  // model. This is where step_path stops being a hard-coded UI value.
+  //
+  // Example target:
+  // model.component("comp1").geom("geom1").feature("imp1").set("filename", stepPath);
+  // model.component("comp1").geom("geom1").run();
+
+  // ------------------------------------------------------------------------
+  // 2. Parametric sweep injection from the manifest row
+  // ------------------------------------------------------------------------
+  //
+  // Replace std1/param with your actual study and parametric sweep feature tags.
+  // COMSOL usually expects a space-separated list here, not a comma list.
+  //
+  String pScheduleSpace = pSchedule.replace(",", " ");
+  // Example target:
+  // model.study("std1").feature("param").set("pname", new String[] {"p_ramp"});
+  // model.study("std1").feature("param").set("plistarr", new String[] {pScheduleSpace});
+
+  // ------------------------------------------------------------------------
+  // 3. Warm-start injection
+  // ------------------------------------------------------------------------
+  //
+  // Cold jobs must explicitly disable checkpoint loading.
+  // Warm jobs must load the checkpoint path selected on the Mac side.
+  //
+  boolean isCold = "cold".equals(scheduleType) || "cold".equals(startCheckpoint);
+  if (isCold) {
+    // Example:
+    // model.sol("sol1").feature("v1").set("useinitsol", false);
+  } else {
+    if (anchorCheckpointPath == null || anchorCheckpointPath.length() == 0) {
+      throw new RuntimeException("Warm-start requested but anchor_checkpoint_path is empty");
+    }
+    // Example:
+    // model.sol("sol1").feature("v1").set("useinitsol", true);
+    // model.sol("sol1").feature("v1").set("initsolfile", anchorCheckpointPath);
+    // model.sol("sol1").feature("v1").set("initsolnum", startCheckpoint);
+  }
+
+  // ------------------------------------------------------------------------
+  // 4. Rebuild the metadata-driven extraction layers
+  // ------------------------------------------------------------------------
+  //
+  // Preferred: call methods directly here so design_id and file paths come from
+  // the manifest row, not stale Method Call node values from the GUI.
+  //
+  // Replace the call syntax below with the exact form COMSOL accepts in your
+  // Application Builder build. The key point is the ownership of the inputs:
+  // this master method owns them, and the builders consume them.
+  //
+  // BuildShaftHoleFluxLayer(holesPath, designId);
+  // BuildCoilHoleFluxLayer(holesPath, designId);
+  // BuildFluxExtractionLayer(measurementMetadataPath, designId);
+
+  // ------------------------------------------------------------------------
+  // 5. Solve
+  // ------------------------------------------------------------------------
+  // Example:
+  // model.study("std1").run();
+
+  // ------------------------------------------------------------------------
+  // 6. Export
+  // ------------------------------------------------------------------------
+  //
+  // Keep export filenames design-specific, even in a reusable template.
+  // Example:
+  // model.result().export("tbl_flux_scalars").set("filename", "C:/.../" + designId + "_flux_scalars.csv");
+  // model.result().export("tbl_flux_features").set("filename", "C:/.../" + designId + "_flux_features.csv");
+  // model.result().export("tbl_flux_scalars").run();
+  // model.result().export("tbl_flux_features").run();
+
+  runState = "completed";
+  runNote = "solve_and_exports_completed";
+} catch (Exception _e) {
+  runState = "failed";
+  runNote = _e.getMessage();
+  throw new RuntimeException("RunManifestJob failed for " + designId + ": " + _e.getMessage());
+} finally {
+  StringBuilder statusLine = new StringBuilder();
+  statusLine.append(designId).append(",");
+  statusLine.append(templateId).append(",");
+  statusLine.append(scheduleType).append(",");
+  statusLine.append(startCheckpoint).append(",");
+  statusLine.append(anchorDesignId == null ? "" : anchorDesignId).append(",");
+  statusLine.append(runState).append(",");
+  statusLine.append(runNote == null ? "" : runNote.replace(",", ";")).append("\n");
+
+  try {
+    if (!java.nio.file.Files.exists(statusLogPath)) {
+      java.nio.file.Files.createDirectories(statusLogPath.getParent());
+      java.nio.file.Files.write(
+        statusLogPath,
+        "design_id,template_id,schedule_type,start_checkpoint,anchor_design_id,status,note\n".getBytes(
+          java.nio.charset.StandardCharsets.UTF_8
+        )
+      );
+    }
+    java.nio.file.Files.write(
+      statusLogPath,
+      statusLine.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+      java.nio.file.StandardOpenOption.APPEND
+    );
+  } catch (Exception _statusError) {
+    throw new RuntimeException("Failed to update run status log: " + _statusError.getMessage());
+  }
+}

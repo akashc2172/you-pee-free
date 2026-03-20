@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.stent-pipeline/comsol_template_contract.schema.json",
+  "title": "COMSOL Template Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "template_id",
+    "template_version",
+    "parser_expectations_version",
+    "sim_contract_version",
+    "domain_template",
+    "selection_strategy",
+    "pressure_contract",
+    "required_named_selections",
+    "required_exports",
+    "artifact_filenames"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "comsol_template_contract_v1"
+    },
+    "template_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "template_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parser_expectations_version": {
+      "type": "string",
+      "const": "comsol_parser_expectations_v1"
+    },
+    "sim_contract_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domain_template": {
+      "type": "string",
+      "const": "triple_domain_dumbbell"
+    },
+    "selection_strategy": {
+      "type": "string",
+      "const": "coordinate_bbox"
+    },
+    "pressure_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "p_inlet_pa",
+        "p_outlet_pa",
+        "delta_p_pa"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "const": "pressure_driven"
+        },
+        "p_inlet_pa": {
+          "type": "number",
+          "const": 490.0
+        },
+        "p_outlet_pa": {
+          "type": "number",
+          "const": 0.0
+        },
+        "delta_p_pa": {
+          "type": "number",
+          "const": 490.0
+        }
+      }
+    },
+    "required_named_selections": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      },
+      "allOf": [
+        { "contains": { "const": "inlet" } },
+        { "contains": { "const": "outlet" } },
+        { "contains": { "const": "stent_walls" } },
+        { "contains": { "const": "coil_zone" } },
+        { "contains": { "const": "mid_zone" } }
+      ]
+    },
+    "required_exports": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      },
+      "allOf": [
+        { "contains": { "const": "results_csv" } },
+        { "contains": { "const": "realized_geometry_csv" } }
+      ]
+    },
+    "artifact_filenames": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "results_csv",
+        "realized_geometry_csv",
+        "batch_log"
+      ],
+      "properties": {
+        "results_csv": {
+          "type": "string",
+          "const": "{run_id}_results.csv"
+        },
+        "realized_geometry_csv": {
+          "type": "string",
+          "const": "{run_id}_realized_geometry.csv"
+        },
+        "batch_log": {
+          "type": "string",
+          "const": "{run_id}.log"
+        }
+      }
+    }
+  }
+}

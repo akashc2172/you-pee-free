@@ -1,0 +1,499 @@
+// ==========================================================================
+// BuildCoilHoleFluxLayer — COMSOL 6.1 Application Builder Method
+// ==========================================================================
+//
+// Setup in COMSOL 6.1:
+//   1. Application Builder → Methods → New Method → "BuildCoilHoleFluxLayer"
+//   2. Add two String method inputs:
+//        hole_metadata_path   (String)
+//        design_id            (String)
+//   3. Paste this entire body into the method body.
+//   4. Save the model.
+//   5. Create Global Definitions → Method Call node for this method.
+//
+// This method reads <design_id>.holes.json and extracts type=="coil" holes.
+// It will create per-hole local selections (cylinder preferred, sphere fallback)
+// and compute per-hole signed and absolute normal flux via boundary integration.
+//
+// Output:
+//   <design_id>_coil_hole_flux.csv next to the .holes.json sidecar
+//
+// Notes:
+// - Sidecar units are mm; this method uses explicit "[mm]" on coordinates/radii.
+// - COMSOL selection feature types/keys may vary by model; this method tries a
+//   small set of likely patterns and fails loudly with details.
+// ==========================================================================
+
+// --- Resolve inputs: method inputs first, then self-discovery fallback ---
+String holeMetadataPathLocal = null;
+String designIdLocal = null;
+
+try {
+  if (hole_metadata_path != null && hole_metadata_path.trim().length() > 0) {
+    holeMetadataPathLocal = hole_metadata_path.trim();
+  }
+  if (design_id != null && design_id.trim().length() > 0) {
+    designIdLocal = design_id.trim();
+  }
+} catch (Exception _ignore) {}
+
+if (holeMetadataPathLocal == null || designIdLocal == null) {
+  String _mphPath = model.getFilePath();
+  if (_mphPath != null && _mphPath.trim().length() > 0) {
+    java.nio.file.Path _mphFile = java.nio.file.Paths.get(_mphPath.trim());
+    String _mphName = _mphFile.getFileName().toString();
+    if (_mphName.endsWith(".mph")) _mphName = _mphName.substring(0, _mphName.length() - 4);
+    if (designIdLocal == null) designIdLocal = _mphName;
+    if (holeMetadataPathLocal == null) {
+      java.nio.file.Path _inferredSidecar = _mphFile.getParent().resolve(_mphName + ".holes.json");
+      if (java.nio.file.Files.exists(_inferredSidecar)) holeMetadataPathLocal = _inferredSidecar.toString();
+    }
+  }
+}
+
+if (holeMetadataPathLocal == null || holeMetadataPathLocal.length() == 0) {
+  throw new RuntimeException("Could not resolve hole_metadata_path from method inputs or model.getFilePath()");
+}
+if (designIdLocal == null || designIdLocal.length() == 0) {
+  throw new RuntimeException("Could not resolve design_id from method inputs or model.getFilePath()");
+}
+
+String DEFAULT_VEL_X = "u";
+String DEFAULT_VEL_Y = "v";
+String DEFAULT_VEL_Z = "w";
+
+String CSV_SUFFIX = "_coil_hole_flux.csv";
+String DEFAULT_SOLUTION_DATASET_TAG = "dset2";
+String FALLBACK_SOLUTION_DATASET_TAG = "dset1";
+String FALLBACK_SOLUTION_TAG = "sol1";
+String MANAGED_DATASET_PREFIX = "CP_coil_";
+String MANAGED_NUMERICAL_PREFIX = "DV_hole_coil_";
+
+java.nio.file.Path sidecarPath = java.nio.file.Paths.get(holeMetadataPathLocal).toAbsolutePath().normalize();
+if (!java.nio.file.Files.exists(sidecarPath)) {
+  throw new RuntimeException("hole_metadata_path does not exist: " + sidecarPath.toString());
+}
+
+// ==========================================================================
+// PARSE SIDECAR — extract coil holes into parallel arrays
+// ==========================================================================
+
+String _sidecarRaw = "";
+try {
+  _sidecarRaw = new String(
+    java.nio.file.Files.readAllBytes(sidecarPath),
+    java.nio.charset.StandardCharsets.UTF_8
+  );
+} catch (Exception _e) {
+  throw new RuntimeException("Failed to read sidecar: " + _e.getMessage());
+}
+
+int _holesKeyIdx = _sidecarRaw.indexOf("\"holes\"");
+if (_holesKeyIdx < 0) throw new RuntimeException("Could not find sidecar key: holes");
+int _holesArrStart = _sidecarRaw.indexOf("[", _holesKeyIdx);
+if (_holesArrStart < 0) throw new RuntimeException("Could not find array start for key: holes");
+
+int _holesDepth = 0;
+int _holesArrEnd = -1;
+for (int _hi = _holesArrStart; _hi < _sidecarRaw.length(); _hi++) {
+  char _hc = _sidecarRaw.charAt(_hi);
+  if (_hc == '[') _holesDepth++;
+  else if (_hc == ']') { _holesDepth--; if (_holesDepth == 0) { _holesArrEnd = _hi; break; } }
+}
+if (_holesArrEnd < 0) throw new RuntimeException("Could not find array end for key: holes");
+String _holesArrayBody = _sidecarRaw.substring(_holesArrStart + 1, _holesArrEnd);
+
+java.util.List _holeObjects = new java.util.ArrayList();
+{
+  int _soDepth = 0; int _soStart = -1;
+  boolean _soInStr = false; boolean _soEsc = false;
+  for (int _si = 0; _si < _holesArrayBody.length(); _si++) {
+    char _sc = _holesArrayBody.charAt(_si);
+    if (_soEsc) { _soEsc = false; continue; }
+    if (_sc == '\\') { _soEsc = true; continue; }
+    if (_sc == '"') { _soInStr = !_soInStr; continue; }
+    if (_soInStr) continue;
+    if (_sc == '{') { if (_soDepth == 0) _soStart = _si; _soDepth++; }
+    else if (_sc == '}') {
+      _soDepth--;
+      if (_soDepth == 0 && _soStart >= 0) {
+        _holeObjects.add(_holesArrayBody.substring(_soStart, _si + 1));
+        _soStart = -1;
+      }
+    }
+  }
+}
+
+java.util.List _cHoleIds       = new java.util.ArrayList();
+java.util.List _cRegions       = new java.util.ArrayList();
+java.util.List _cAxialXmm      = new java.util.ArrayList();
+java.util.List _cAxialRanks    = new java.util.ArrayList();
+java.util.List _cCenterXmm     = new java.util.ArrayList();
+java.util.List _cCenterYmm     = new java.util.ArrayList();
+java.util.List _cCenterZmm     = new java.util.ArrayList();
+java.util.List _cNormalX       = new java.util.ArrayList();
+java.util.List _cNormalY       = new java.util.ArrayList();
+java.util.List _cNormalZ       = new java.util.ArrayList();
+java.util.List _cRadiusMm      = new java.util.ArrayList();
+java.util.List _cSelCylRadMm   = new java.util.ArrayList();
+java.util.List _cSelSphRadMm   = new java.util.ArrayList();
+
+for (int _oi = 0; _oi < _holeObjects.size(); _oi++) {
+  String _obj = (String) _holeObjects.get(_oi);
+
+  java.util.regex.Matcher _typeMatcher = java.util.regex.Pattern.compile(
+    "\"type\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (!_typeMatcher.find()) continue;
+  if (!"coil".equals(_typeMatcher.group(1))) continue;
+
+  java.util.regex.Matcher _idMatcher = java.util.regex.Pattern.compile(
+    "\"hole_id\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (!_idMatcher.find()) throw new RuntimeException("Missing hole_id in coil hole object");
+  _cHoleIds.add(_idMatcher.group(1));
+
+  java.util.regex.Matcher _regMatcher = java.util.regex.Pattern.compile(
+    "\"region\"\\s*:\\s*\"([^\"]*)\"", java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (!_regMatcher.find()) throw new RuntimeException("Missing region in coil hole object");
+  _cRegions.add(_regMatcher.group(1));
+
+  java.util.regex.Matcher _axMatcher = java.util.regex.Pattern.compile(
+    "\"axial_x_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (_axMatcher.find()) _cAxialXmm.add(Double.valueOf(Double.parseDouble(_axMatcher.group(1))));
+  else _cAxialXmm.add(Double.valueOf(Double.NaN));
+
+  java.util.regex.Matcher _arMatcher = java.util.regex.Pattern.compile(
+    "\"axial_rank\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (_arMatcher.find()) _cAxialRanks.add(Integer.valueOf((int) Math.round(Double.parseDouble(_arMatcher.group(1)))));
+  else _cAxialRanks.add(Integer.valueOf(-1));
+
+  java.util.regex.Matcher _cMatcher = java.util.regex.Pattern.compile(
+    "\"center_mm\"\\s*:\\s*\\[([^\\]]*)\\]", java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (!_cMatcher.find()) throw new RuntimeException("Missing center_mm in coil hole object");
+  String[] _cParts = _cMatcher.group(1).split(",");
+  _cCenterXmm.add(Double.valueOf(Double.parseDouble(_cParts[0].trim())));
+  _cCenterYmm.add(Double.valueOf(Double.parseDouble(_cParts[1].trim())));
+  _cCenterZmm.add(Double.valueOf(Double.parseDouble(_cParts[2].trim())));
+
+  java.util.regex.Matcher _nMatcher = java.util.regex.Pattern.compile(
+    "\"normal\"\\s*:\\s*\\[([^\\]]*)\\]", java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (!_nMatcher.find()) throw new RuntimeException("Missing normal in coil hole object");
+  String[] _nParts = _nMatcher.group(1).split(",");
+  _cNormalX.add(Double.valueOf(Double.parseDouble(_nParts[0].trim())));
+  _cNormalY.add(Double.valueOf(Double.parseDouble(_nParts[1].trim())));
+  _cNormalZ.add(Double.valueOf(Double.parseDouble(_nParts[2].trim())));
+
+  double _radiusMm = Double.NaN;
+  java.util.regex.Matcher _rrMatcher = java.util.regex.Pattern.compile(
+    "\"radius_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (_rrMatcher.find()) _radiusMm = Double.parseDouble(_rrMatcher.group(1));
+  _cRadiusMm.add(Double.valueOf(_radiusMm));
+
+  double _selCylMm = Double.NaN;
+  java.util.regex.Matcher _crMatcher = java.util.regex.Pattern.compile(
+    "\"selection_cylinder_radius_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)",
+    java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (_crMatcher.find()) _selCylMm = Double.parseDouble(_crMatcher.group(1));
+  _cSelCylRadMm.add(Double.valueOf(_selCylMm));
+
+  double _selSphMm = Double.NaN;
+  java.util.regex.Matcher _srMatcher = java.util.regex.Pattern.compile(
+    "\"selection_sphere_radius_mm\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)",
+    java.util.regex.Pattern.DOTALL
+  ).matcher(_obj);
+  if (_srMatcher.find()) _selSphMm = Double.parseDouble(_srMatcher.group(1));
+  _cSelSphRadMm.add(Double.valueOf(_selSphMm));
+}
+
+int _nCoil = _cHoleIds.size();
+if (_nCoil == 0) {
+  throw new RuntimeException("No coil holes found in sidecar: " + sidecarPath.toString());
+}
+
+String[] holeIds = new String[_nCoil];
+String[] regions = new String[_nCoil];
+double[] axialXmm = new double[_nCoil];
+int[] axialRanks = new int[_nCoil];
+double[] centerXmm = new double[_nCoil];
+double[] centerYmm = new double[_nCoil];
+double[] centerZmm = new double[_nCoil];
+double[] normalX = new double[_nCoil];
+double[] normalY = new double[_nCoil];
+double[] normalZ = new double[_nCoil];
+double[] radiusMm = new double[_nCoil];
+double[] selCylRadMm = new double[_nCoil];
+double[] selSphRadMm = new double[_nCoil];
+
+for (int _i = 0; _i < _nCoil; _i++) {
+  holeIds[_i] = (String) _cHoleIds.get(_i);
+  regions[_i] = (String) _cRegions.get(_i);
+  axialXmm[_i] = ((Double) _cAxialXmm.get(_i)).doubleValue();
+  axialRanks[_i] = ((Integer) _cAxialRanks.get(_i)).intValue();
+  centerXmm[_i] = ((Double) _cCenterXmm.get(_i)).doubleValue();
+  centerYmm[_i] = ((Double) _cCenterYmm.get(_i)).doubleValue();
+  centerZmm[_i] = ((Double) _cCenterZmm.get(_i)).doubleValue();
+  normalX[_i] = ((Double) _cNormalX.get(_i)).doubleValue();
+  normalY[_i] = ((Double) _cNormalY.get(_i)).doubleValue();
+  normalZ[_i] = ((Double) _cNormalZ.get(_i)).doubleValue();
+  radiusMm[_i] = ((Double) _cRadiusMm.get(_i)).doubleValue();
+  selCylRadMm[_i] = ((Double) _cSelCylRadMm.get(_i)).doubleValue();
+  selSphRadMm[_i] = ((Double) _cSelSphRadMm.get(_i)).doubleValue();
+}
+
+// Sort by axial_rank if available, else by axial_x_mm, else hole_id.
+for (int _i = 0; _i < _nCoil - 1; _i++) {
+  for (int _j = 0; _j < _nCoil - 1 - _i; _j++) {
+    boolean _swap = false;
+    int ar0 = axialRanks[_j];
+    int ar1 = axialRanks[_j + 1];
+    boolean has0 = (ar0 >= 0);
+    boolean has1 = (ar1 >= 0);
+    if (has0 && has1) {
+      if (ar0 > ar1) _swap = true;
+    } else if (!has0 && !has1) {
+      double ax0 = axialXmm[_j];
+      double ax1 = axialXmm[_j + 1];
+      if (!Double.isNaN(ax0) && !Double.isNaN(ax1)) {
+        if (ax0 > ax1) _swap = true;
+      } else {
+        if (holeIds[_j].compareTo(holeIds[_j + 1]) > 0) _swap = true;
+      }
+    } else {
+      if (has1 && !has0) _swap = true;
+    }
+    if (_swap) {
+      String _tmpS;
+      double _tmpD;
+      int _tmpI;
+      _tmpS = holeIds[_j]; holeIds[_j] = holeIds[_j+1]; holeIds[_j+1] = _tmpS;
+      _tmpS = regions[_j]; regions[_j] = regions[_j+1]; regions[_j+1] = _tmpS;
+      _tmpD = axialXmm[_j]; axialXmm[_j] = axialXmm[_j+1]; axialXmm[_j+1] = _tmpD;
+      _tmpI = axialRanks[_j]; axialRanks[_j] = axialRanks[_j+1]; axialRanks[_j+1] = _tmpI;
+      _tmpD = centerXmm[_j]; centerXmm[_j] = centerXmm[_j+1]; centerXmm[_j+1] = _tmpD;
+      _tmpD = centerYmm[_j]; centerYmm[_j] = centerYmm[_j+1]; centerYmm[_j+1] = _tmpD;
+      _tmpD = centerZmm[_j]; centerZmm[_j] = centerZmm[_j+1]; centerZmm[_j+1] = _tmpD;
+      _tmpD = normalX[_j]; normalX[_j] = normalX[_j+1]; normalX[_j+1] = _tmpD;
+      _tmpD = normalY[_j]; normalY[_j] = normalY[_j+1]; normalY[_j+1] = _tmpD;
+      _tmpD = normalZ[_j]; normalZ[_j] = normalZ[_j+1]; normalZ[_j+1] = _tmpD;
+      _tmpD = radiusMm[_j]; radiusMm[_j] = radiusMm[_j+1]; radiusMm[_j+1] = _tmpD;
+      _tmpD = selCylRadMm[_j]; selCylRadMm[_j] = selCylRadMm[_j+1]; selCylRadMm[_j+1] = _tmpD;
+      _tmpD = selSphRadMm[_j]; selSphRadMm[_j] = selSphRadMm[_j+1]; selSphRadMm[_j+1] = _tmpD;
+    }
+  }
+}
+
+// ==========================================================================
+// CLEAN UP any previously managed nodes (numericals + datasets)
+// ==========================================================================
+
+try {
+  String[] _numTags = model.result().numerical().tags();
+  for (int _ni = 0; _ni < _numTags.length; _ni++) {
+    if (_numTags[_ni].startsWith(MANAGED_NUMERICAL_PREFIX)) {
+      model.result().numerical().remove(_numTags[_ni]);
+    }
+  }
+} catch (Exception _ignore) {}
+
+try {
+  String[] _dsTags = model.result().dataset().tags();
+  for (int _di = 0; _di < _dsTags.length; _di++) {
+    if (_dsTags[_di].startsWith(MANAGED_DATASET_PREFIX)) {
+      model.result().dataset().remove(_dsTags[_di]);
+    }
+  }
+} catch (Exception _ignore) {}
+
+// ==========================================================================
+// FIND solution dataset (mirror shaft method logic)
+// ==========================================================================
+
+String solutionDatasetTag = null;
+{
+  String[] _dsCheckTags = model.result().dataset().tags();
+  String[] _preferred = new String[] { DEFAULT_SOLUTION_DATASET_TAG, FALLBACK_SOLUTION_DATASET_TAG };
+  for (int _pi = 0; _pi < _preferred.length && solutionDatasetTag == null; _pi++) {
+    for (int _di = 0; _di < _dsCheckTags.length; _di++) {
+      if (_preferred[_pi].equals(_dsCheckTags[_di])) { solutionDatasetTag = _preferred[_pi]; break; }
+    }
+  }
+  if (solutionDatasetTag == null) {
+    for (int _di = 0; _di < _dsCheckTags.length; _di++) {
+      try {
+        String _dsType = model.result().dataset(_dsCheckTags[_di]).getType();
+        if ("Solution".equals(_dsType)) { solutionDatasetTag = _dsCheckTags[_di]; break; }
+      } catch (Exception _ignore) {}
+    }
+  }
+  if (solutionDatasetTag == null) {
+    throw new RuntimeException("Could not find a compatible solution dataset.");
+  }
+}
+
+String solutionTag = FALLBACK_SOLUTION_TAG;
+try {
+  String _solRef = model.result().dataset(solutionDatasetTag).getString("solution");
+  if (_solRef != null && _solRef.trim().length() > 0) solutionTag = _solRef.trim();
+} catch (Exception _ignore) {}
+
+// ==========================================================================
+// CREATE cut planes + derived values (mirror shaft method pattern)
+// ==========================================================================
+
+String[] cpTags = new String[_nCoil];
+String[] signedTags = new String[_nCoil];
+String[] absTags = new String[_nCoil];
+
+for (int _i = 0; _i < _nCoil; _i++) {
+  cpTags[_i] = MANAGED_DATASET_PREFIX + holeIds[_i];
+  signedTags[_i] = MANAGED_NUMERICAL_PREFIX + holeIds[_i] + "_signed";
+  absTags[_i] = MANAGED_NUMERICAL_PREFIX + holeIds[_i] + "_abs";
+}
+
+for (int _h = 0; _h < _nCoil; _h++) {
+  String _mmCx = String.format(java.util.Locale.US, "%.9f[mm]", centerXmm[_h]);
+  String _mmCy = String.format(java.util.Locale.US, "%.9f[mm]", centerYmm[_h]);
+  String _mmCz = String.format(java.util.Locale.US, "%.9f[mm]", centerZmm[_h]);
+
+  String _sNx  = String.format(java.util.Locale.US, "%.12f", normalX[_h]);
+  String _sNy  = String.format(java.util.Locale.US, "%.12f", normalY[_h]);
+  String _sNz  = String.format(java.util.Locale.US, "%.12f", normalZ[_h]);
+
+  double _rMm = Double.NaN;
+  if (!Double.isNaN(selCylRadMm[_h]) && selCylRadMm[_h] > 0) _rMm = selCylRadMm[_h];
+  else if (!Double.isNaN(selSphRadMm[_h]) && selSphRadMm[_h] > 0) _rMm = selSphRadMm[_h];
+  else if (!Double.isNaN(radiusMm[_h]) && radiusMm[_h] > 0) _rMm = radiusMm[_h];
+  else _rMm = 0.5;
+
+  String _mmMr = String.format(java.util.Locale.US, "%.9f[mm]", _rMm);
+  String _maskExpr = String.format(java.util.Locale.US,
+    "if((x-(%s))^2 + (y-(%s))^2 + (z-(%s))^2 <= (%s)^2, 1, 0)",
+    _mmCx, _mmCy, _mmCz, _mmMr);
+
+  String _localFlux = String.format(java.util.Locale.US,
+    "((%s)*(%s) + (%s)*(%s) + (%s)*(%s))",
+    _sNx, DEFAULT_VEL_X, _sNy, DEFAULT_VEL_Y, _sNz, DEFAULT_VEL_Z);
+
+  String _signedExpr = "(" + _localFlux + ")*(" + _maskExpr + ")";
+  String _absExpr    = "(abs(" + _localFlux + "))*(" + _maskExpr + ")";
+
+  model.result().dataset().create(cpTags[_h], "CutPlane");
+  model.result().dataset(cpTags[_h]).label("Coil hole cut plane: " + holeIds[_h]);
+  model.result().dataset(cpTags[_h]).set("data", solutionDatasetTag);
+  model.result().dataset(cpTags[_h]).set("planetype", "general");
+  model.result().dataset(cpTags[_h]).set("genmethod", "pointnormal");
+  model.result().dataset(cpTags[_h]).set("genpnpoint", new String[] { _mmCx, _mmCy, _mmCz });
+  model.result().dataset(cpTags[_h]).set("genpnvec",   new String[] { _sNx,  _sNy,  _sNz  });
+
+  model.result().numerical().create(signedTags[_h], "IntSurface");
+  model.result().numerical(signedTags[_h]).label("Signed local flux: " + holeIds[_h]);
+  model.result().numerical(signedTags[_h]).set("data", cpTags[_h]);
+  model.result().numerical(signedTags[_h]).set("expr",  new String[] { _signedExpr });
+  model.result().numerical(signedTags[_h]).set("descr", new String[] { "Signed local coil-hole flux (u·n_hole)" });
+  model.result().numerical(signedTags[_h]).set("unit",  new String[] { "m^3/s" });
+
+  model.result().numerical().create(absTags[_h], "IntSurface");
+  model.result().numerical(absTags[_h]).label("Absolute local flux: " + holeIds[_h]);
+  model.result().numerical(absTags[_h]).set("data", cpTags[_h]);
+  model.result().numerical(absTags[_h]).set("expr",  new String[] { _absExpr });
+  model.result().numerical(absTags[_h]).set("descr", new String[] { "Absolute local coil-hole flux (|u·n_hole|)" });
+  model.result().numerical(absTags[_h]).set("unit",  new String[] { "m^3/s" });
+}
+
+// ==========================================================================
+// EVALUATE and write CSV (mirror shaft method shape)
+// ==========================================================================
+
+com.comsol.model.SolutionInfo _solInfo = null;
+int[] _outerSolnums = null;
+try {
+  _solInfo = model.sol(solutionTag).getSolutioninfo();
+  _outerSolnums = _solInfo.getOuterSolnum();
+} catch (Exception _ignore) {}
+if (_outerSolnums == null || _outerSolnums.length == 0) {
+  _outerSolnums = new int[] { 0 };
+}
+
+StringBuilder _csv = new StringBuilder();
+_csv.append("hole_id,type,region,axial_x_mm,center_x_mm,center_y_mm,center_z_mm,p_ramp,signed_flux_m3s,abs_flux_m3s\n");
+
+for (int _si = 0; _si < _outerSolnums.length; _si++) {
+  int _outerSolnum = _outerSolnums[_si];
+
+  Double _pRamp = null;
+  if (_solInfo != null) {
+    try {
+      int[] _innerSolnums = _solInfo.getSolnum(_outerSolnum, false);
+      int _innerSolnum = 1;
+      if (_innerSolnums != null && _innerSolnums.length > 0 && _innerSolnums[0] > 0)
+        _innerSolnum = _innerSolnums[0];
+      int[][] _solnums = new int[][] { new int[] { _outerSolnum, _innerSolnum } };
+      String[][] _pnames = _solInfo.getPNames(_solnums);
+      double[][] _pvals  = _solInfo.getPvals(_solnums);
+      if (_pnames != null && _pvals != null && _pnames.length > 0 && _pvals.length > 0) {
+        for (int _pi = 0; _pi < _pnames[0].length; _pi++) {
+          if ("p_ramp".equals(_pnames[0][_pi])) {
+            _pRamp = Double.valueOf(_pvals[0][_pi]);
+            break;
+          }
+        }
+      }
+    } catch (Exception _ignore) {}
+  }
+
+  for (int _h = 0; _h < _nCoil; _h++) {
+    double _signedVal = Double.NaN;
+    try {
+      double[][] _sVals;
+      if (_outerSolnum > 0) _sVals = model.result().numerical(signedTags[_h]).getReal(_outerSolnum);
+      else                  _sVals = model.result().numerical(signedTags[_h]).getReal();
+      if (_sVals != null && _sVals.length > 0 && _sVals[0].length > 0) _signedVal = _sVals[0][0];
+    } catch (Exception _ignore) {}
+
+    double _absVal = Double.NaN;
+    try {
+      double[][] _aVals;
+      if (_outerSolnum > 0) _aVals = model.result().numerical(absTags[_h]).getReal(_outerSolnum);
+      else                  _aVals = model.result().numerical(absTags[_h]).getReal();
+      if (_aVals != null && _aVals.length > 0 && _aVals[0].length > 0) _absVal = _aVals[0][0];
+    } catch (Exception _ignore) {}
+
+    _csv.append(holeIds[_h]).append(",");
+    _csv.append("coil").append(",");
+    _csv.append(regions[_h]).append(",");
+    if (!Double.isNaN(axialXmm[_h]) && !Double.isInfinite(axialXmm[_h]))
+      _csv.append(String.format(java.util.Locale.US, "%.12e", axialXmm[_h]));
+    _csv.append(",");
+    _csv.append(String.format(java.util.Locale.US, "%.12e", centerXmm[_h])).append(",");
+    _csv.append(String.format(java.util.Locale.US, "%.12e", centerYmm[_h])).append(",");
+    _csv.append(String.format(java.util.Locale.US, "%.12e", centerZmm[_h])).append(",");
+    if (_pRamp != null && !_pRamp.isNaN() && !_pRamp.isInfinite())
+      _csv.append(String.format(java.util.Locale.US, "%.12e", _pRamp.doubleValue()));
+    _csv.append(",");
+    if (!Double.isNaN(_signedVal) && !Double.isInfinite(_signedVal))
+      _csv.append(String.format(java.util.Locale.US, "%.12e", _signedVal));
+    _csv.append(",");
+    if (!Double.isNaN(_absVal) && !Double.isInfinite(_absVal))
+      _csv.append(String.format(java.util.Locale.US, "%.12e", _absVal));
+    _csv.append("\n");
+  }
+}
+
+java.nio.file.Path _outputCsv = sidecarPath.resolveSibling(designIdLocal + CSV_SUFFIX);
+try {
+  java.nio.file.Files.write(
+    _outputCsv,
+    _csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)
+  );
+} catch (Exception _e) {
+  throw new RuntimeException("Failed to write CSV: " + _outputCsv.toString() + " — " + _e.getMessage());
+}
+

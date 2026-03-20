@@ -1,0 +1,72 @@
+{
+  "base_mph": "/Users/akashc/masters/data/comsol_templates/base_flow_len140_v1.mph",
+  "manifest_csv": "/Users/akashc/masters/data/campaigns/campaign_len140/batch_0001.csv",
+  "output_dir": "/Users/akashc/masters/data/campaigns/campaign_len140/matlab_runs",
+  "template": {
+    "component_tag": "comp1",
+    "geometry_tag": "geom1",
+    "import_feature_tag": "imp1",
+    "mesh_tag": "mesh1",
+    "study_tag": "std1",
+    "method_call_tag": "methodcall1",
+    "results_export_tag": "tblexp1",
+    "realized_geometry_export_tag": "tblexp2",
+    "hole_flux_input_mode": "method_inputs",
+    "hole_flux_input_names": {
+      "hole_metadata_path": "hole_metadata_path",
+      "design_id": "design_id"
+    },
+    "parameter_names": {
+      "cad_path": "cad_path",
+      "hole_metadata_path": "hole_metadata_path",
+      "design_id": "design_id",
+      "p_inlet_pa": "p_inlet_pa",
+      "p_outlet_pa": "p_outlet_pa",
+      "delta_p_pa": "delta_p_pa"
+    }
+  },
+  "execution": {
+    "resume": true,
+    "continue_on_error": true,
+    "run_geometry_before_study": true,
+    "run_mesh_before_study": true,
+    "run_hole_flux_after_study": true,
+    "save_model_copy": true,
+    "copy_sidecar_flux_csv_into_attempt_dir": true
+  },
+  "boundary_conditions": {
+    "p_inlet_pa": 490.0,
+    "p_outlet_pa": 0.0,
+    "delta_p_pa": 490.0
+  },
+  "qc": {
+    "expected_delta_p_pa": 490.0,
+    "delta_p_abs_tolerance_pa": 1.0,
+    "max_mass_balance_error": 0.01,
+    "min_mesh_quality": 0.05,
+    "max_solver_relative_tolerance": 0.001,
+    "require_solver_tolerance": true,
+    "require_realized_geometry": true,
+    "require_convergence_evidence": true
+  },
+  "aliases": {
+    "q_out": ["q_out", "q_total", "spf_out1_volumeflowrate", "outlet_volume_flow_rate"],
+    "q_in": ["q_in", "spf_inl1_volumeflowrate", "inlet_volume_flow_rate"],
+    "p_in": ["p_in", "p_inlet", "spf_inl1_paverage", "inlet_average_pressure"],
+    "p_out": ["p_out", "p_outlet", "spf_out1_paverage", "outlet_average_pressure"],
+    "delta_p": ["delta_p", "dp", "pressure_drop"],
+    "mass_imbalance": ["mass_imbalance", "mass_balance_error"],
+    "mesh_min_quality": ["minimum_element_quality", "mesh_min_quality", "min_element_quality"],
+    "solver_relative_tolerance": ["solver_relative_tolerance", "relative_tolerance", "solver_tol"]
+  },
+  "log_patterns": {
+    "convergence": [
+      "Stationary Solver.*Ended at",
+      "Solver finished\\.",
+      "Study completed successfully"
+    ],
+    "relative_tolerance": [
+      "Relative tolerance(?:\\s+used)?:?\\s*([\\d\\.Ee+-]+)"
+    ]
+  }
+}

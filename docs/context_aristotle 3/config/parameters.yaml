@@ -1,0 +1,225 @@
+# Stent Design Parameter Configuration
+# Updated 2026-02-02: Consolidated from old stent generation code
+
+# ==============================================================================
+# SAMPLED PARAMETERS (LHS inputs)
+# ==============================================================================
+design_variables:
+  # Primary dimensions
+  stent_french:
+    type: continuous
+    range: [4.0, 8.0]
+    default: 6.0
+    description: "Stent diameter in French units (1 Fr = 0.333 mm)"
+    
+  stent_length:
+    type: continuous
+    range: [100, 300]
+    default: 150
+    description: "Total body length in millimeters"
+    
+  # Fraction-based parameters (guarantees valid geometry)
+  r_t:
+    type: continuous
+    range: [0.10, 0.22]
+    default: 0.15
+    description: "Wall thickness fraction: wall = r_t × OD"
+    
+  r_sh:
+    type: continuous
+    range: [0.20, 0.70]
+    default: 0.50
+    description: "Side hole diameter fraction: d_sh = r_sh × ID"
+    
+  r_end:
+    type: continuous
+    range: [0.30, 0.95]
+    default: 0.70
+    description: "End hole diameter fraction: d_end = r_end × ID"
+    
+  # Hole counts
+  n_prox:
+    type: discrete
+    range: [0, 10]
+    default: 3
+    description: "Number of proximal side holes"
+    
+  n_mid:
+    type: discrete
+    range: [0, 15]
+    default: 6
+    description: "Number of middle side holes"
+    
+  n_dist:
+    type: discrete
+    range: [0, 10]
+    default: 3
+    description: "Number of distal side holes"
+    
+  # Section lengths
+  section_length_prox:
+    type: continuous
+    range: [20, 60]
+    default: 30
+    description: "Proximal section length in mm"
+    
+  section_length_dist:
+    type: continuous
+    range: [20, 60]
+    default: 30
+    description: "Distal section length in mm"
+    
+  # Unroofed cut
+  unroofed_length:
+    type: continuous
+    range: [0, 30]
+    default: 0
+    description: "Length of unroofed section at distal end in mm"
+
+# ==============================================================================
+# DERIVED PARAMETERS (computed from sampled values)
+# ==============================================================================
+derived_parameters:
+  OD:
+    formula: "0.333 × stent_french"
+    unit: "mm"
+    
+  wall_thickness:
+    formula: "r_t × OD"
+    unit: "mm"
+    
+  ID:
+    formula: "OD - 2 × wall_thickness"
+    unit: "mm"
+    
+  d_sh:
+    formula: "min(r_sh × ID, ID - 0.15)"
+    unit: "mm"
+    
+  section_length_mid:
+    formula: "stent_length - section_length_prox - section_length_dist"
+    unit: "mm"
+
+# ==============================================================================
+# VALIDATION CONSTRAINTS
+# ==============================================================================
+constraints:
+  ID_min: 0.6
+  d_sh_min: 0.3
+  cap_margin: 0.15
+  gap_min: 0.3
+  buffer_min: 1.0
+  section_middle_min: 10
+
+# ==============================================================================
+# SAMPLING CONFIGURATION
+# ==============================================================================
+sampling:
+  default_method: "lhs"
+  default_samples: 60
+  oversample_factor: 3
+  random_seed: 42
+  n_dims: 11  # Total sampled dimensions (coil geometry fixed)
+
+# ==============================================================================
+# FIXED CAD SETTINGS (not sampled in LHS)
+# ==============================================================================
+fixed_cad_settings:
+  freeze_coil_geometry: true
+  # Coil radius / helix pitch / helix turns are intentionally locked for v1.
+  # Keep them out of design variables and downstream manifests.
+  # coil_radius_mm: 6.0
+  # coil_pitch_mm: 6.0
+  # coil_turns: 1.5
+  half_open_distal_enabled: true
+  coil_hole_radius_mode: "match_body_hole_radius"
+
+# ==============================================================================
+# STL EXPORT DEFAULTS (visualization/manufacturing mesh)
+# ==============================================================================
+stl_export:
+  default_profile: "standard"
+  ascii_format: false
+  validate_mesh: true
+  profiles:
+    draft:
+      tolerance: 0.005
+      angular_tolerance: 0.25
+    standard:
+      tolerance: 0.001
+      angular_tolerance: 0.1
+    high:
+      tolerance: 0.0005
+      angular_tolerance: 0.05
+
+# ==============================================================================
+# CAD POST-PROCESS RULES (non-sampled behavior)
+# ==============================================================================
+cad_postprocess:
+  unroofed_hole_policy: "auto_rebalance"
+  unroofed_clearance_mode: "max(buffer_min,hole_radius)"
+  emit_realized_features: true
+
+# ==============================================================================
+# CANONICAL COMSOL SIMULATION CONTRACT (campaign-level)
+# ==============================================================================
+simulation_contract:
+  sim_contract_version: "v1_deltaP490_steady_laminar"
+  validation_mode: false
+  physics:
+    model: "Single-Phase Flow (Laminar, spf)"
+    steady_state: true
+    incompressible: true
+    fluid_model: "Newtonian"
+    no_slip_walls: true
+    density_kg_m3: 1000.0
+    viscosity_pa_s: 0.001
+  boundary_conditions:
+    mode: "pressure_driven"
+    p_inlet_pa: 490.0
+    p_outlet_pa: 0.0
+    delta_p_pa: 490.0
+  domain_template: "triple_domain_dumbbell"
+  selection_strategy: "coordinate_bbox"
+  qc_thresholds:
+    max_mass_balance_error: 0.01
+    min_mesh_quality: 0.05
+    target_min_mesh_quality: 0.1
+    max_solver_relative_tolerance: 0.001
+    delta_p_abs_tolerance_pa: 1.0
+    require_finite_outputs: true
+    require_pressure_sign_consistency: true
+    require_flow_sign_consistency: true
+    require_explicit_solver_tolerance: true
+    require_realized_geometry: true
+  failure_policy:
+    on_qc_fail: "invalid_qc_penalty"
+    on_solver_fail: "failed_solver"
+    on_geometry_fail: "failed_geometry"
+    on_extraction_fail: "failed_extraction"
+    max_remesh_retries: 1
+
+# ==============================================================================
+# OUTPUT VARIABLES (from COMSOL)
+# ==============================================================================
+output_variables:
+  - name: "delta_P"
+    description: "Pressure drop (Pa)"
+    direction: "minimize"
+    
+  - name: "Q_total"
+    description: "Total outlet flow (mL/min)"
+    direction: "maximize"
+    
+  - name: "Q_sh_prox"
+    description: "Proximal side-hole flow (mL/min)"
+    
+  - name: "Q_sh_mid"
+    description: "Middle side-hole flow (mL/min)"
+    
+  - name: "Q_sh_dist"
+    description: "Distal side-hole flow (mL/min)"
+    
+  - name: "CV_Qsh"
+    description: "Coefficient of variation of side-hole flows"
+    direction: "minimize"

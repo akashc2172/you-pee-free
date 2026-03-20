@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pediatric Stent Pipeline Walkthrough — Detailed</title>
+  <style>
+    :root {
+      --bg: #f4efe7;
+      --paper: #fbf8f3;
+      --panel: #efe6d8;
+      --ink: #1f2933;
+      --muted: #5f6c76;
+      --line: #d8c9b3;
+      --accent: #8f3b2f;
+      --accent-soft: #d9a691;
+      --teal: #0f766e;
+      --gold: #a86c19;
+      --olive: #5f6b2c;
+      --beige: #d9cbb7;
+      --shadow: 0 18px 40px rgba(51, 41, 28, 0.08);
+      --radius: 20px;
+      --nav-w: 300px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-snap-type: y proximity; }
+    body {
+      margin: 0; color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(143,59,47,0.08), transparent 24%),
+        radial-gradient(circle at top right, rgba(15,118,110,0.08), transparent 22%),
+        linear-gradient(180deg, #f7f2ea 0%, var(--bg) 100%);
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.55;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell { display: grid; grid-template-columns: var(--nav-w) 1fr; min-height: 100vh; }
+    .nav {
+      position: sticky; top: 0; height: 100vh; padding: 24px 20px;
+      border-right: 1px solid rgba(143,59,47,0.14);
+      background: rgba(251,248,243,0.92); backdrop-filter: blur(16px); overflow: auto;
+    }
+    .nav h1 { margin:0 0 8px; font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif; font-size:1.6rem; line-height:1.02; letter-spacing:-0.03em; }
+    .nav .sub { color: var(--muted); margin-bottom: 14px; font-size: 0.95rem; }
+    .chip-row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+    .chip { border:1px solid rgba(31,41,51,0.12); background:rgba(255,255,255,0.75); border-radius:999px; padding:6px 10px; font-size:0.74rem; letter-spacing:0.03em; text-transform:uppercase; }
+    .chip.confirmed { border-color: rgba(15,118,110,0.22); color: var(--teal); }
+    .chip.inferred { border-color: rgba(168,108,25,0.22); color: var(--gold); }
+    .chip.implemented { border-color: rgba(95,107,44,0.22); color: var(--olive); }
+    .nav ol { list-style:none; padding:0; margin:0; display:grid; gap:8px; }
+    .nav a.step-link { display:block; padding:10px 12px; border-radius:14px; color:var(--ink); border:1px solid transparent; transition:180ms ease; }
+    .nav a.step-link:hover, .nav a.step-link.active { background:rgba(255,255,255,0.88); border-color:rgba(143,59,47,0.14); box-shadow: var(--shadow); text-decoration:none; }
+    .nav .step-num { display:inline-block; width:34px; color:var(--accent); font-size:0.82rem; font-weight:700; }
+    main { padding: 22px 26px 60px; }
+    section.slide { min-height: 96vh; scroll-snap-align:start; display:grid; align-content:center; padding: 28px 0; border-bottom:1px solid rgba(143,59,47,0.12); }
+    .slide-inner { background:rgba(251,248,243,0.8); border:1px solid rgba(143,59,47,0.12); border-radius:28px; box-shadow:var(--shadow); padding:30px; }
+    .eyebrow { color:var(--accent); text-transform:uppercase; letter-spacing:0.12em; font-size:0.75rem; font-weight:700; margin-bottom:10px; }
+    h2 { margin:0 0 12px; font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif; font-size:clamp(2rem,2.5vw,3.15rem); line-height:1.03; letter-spacing:-0.03em; max-width: 15ch; }
+    .lede { font-size:1.04rem; color:var(--muted); max-width:80ch; margin-bottom:18px; }
+    .grid-2,.grid-3,.grid-4 { display:grid; gap:18px; }
+    .grid-2 { grid-template-columns: 1.25fr 1fr; }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .card { background:var(--paper); border:1px solid rgba(31,41,51,0.08); border-radius:var(--radius); padding:18px 18px 16px; box-shadow:0 8px 24px rgba(51,41,28,0.05); }
+    .card h3,.card h4 { margin:0 0 10px; font-size:1.02rem; line-height:1.2; }
+    .card p { margin:0 0 12px; color:var(--muted); }
+    .metric-row { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin-top:8px; }
+    .metric { background:linear-gradient(180deg,#fffdf8 0%,#f7f1e8 100%); border:1px solid rgba(143,59,47,0.1); border-radius:16px; padding:14px; }
+    .metric .k { font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:8px; }
+    .metric .v { font-size:1.55rem; font-weight:700; line-height:1; margin-bottom:6px; }
+    .metric .note { color:var(--muted); font-size:0.87rem; }
+    .pipeline { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; margin-top:16px; }
+    .stage { position:relative; padding:18px 14px; border-radius:18px; background:rgba(255,255,255,0.86); border:1px solid rgba(31,41,51,0.08); min-height:190px; }
+    .stage::after { content:""; position:absolute; top:50%; right:-11px; width:18px; height:2px; background:rgba(143,59,47,0.35); transform:translateY(-50%); }
+    .stage:last-child::after { display:none; }
+    .stage .n { color:var(--accent); font-size:0.76rem; font-weight:700; letter-spacing:0.09em; text-transform:uppercase; margin-bottom:8px; }
+    .stage h3 { margin:0 0 10px; font-size:1rem; }
+    .stage p,.stage .mini { margin:0 0 8px; color:var(--muted); font-size:0.9rem; }
+    .status { display:inline-flex; align-items:center; gap:8px; font-size:0.8rem; border-radius:999px; padding:6px 10px; background:rgba(255,255,255,0.72); border:1px solid rgba(31,41,51,0.08); margin-right:8px; margin-bottom:10px; }
+    .status .dot { width:9px; height:9px; border-radius:50%; background:var(--teal); display:inline-block; }
+    .status.inferred .dot { background: var(--gold); }
+    .status.planned .dot { background: #4466aa; }
+    .asset,.shot { padding:14px; border-radius:16px; background:rgba(255,255,255,0.84); border:1px solid rgba(31,41,51,0.08); }
+    .asset strong,.shot strong { display:block; margin-bottom:6px; }
+    .thumb { width:100%; border-radius:18px; border:1px solid rgba(31,41,51,0.08); background:#efe9dd; object-fit:cover; }
+    pre,code { font-family:"SFMono-Regular", Menlo, Consolas, monospace; }
+    pre { margin:0; white-space:pre-wrap; word-break:break-word; font-size:0.82rem; line-height:1.45; color:#24313d; background:#f4f0e7; border:1px solid rgba(31,41,51,0.08); border-radius:16px; padding:14px; overflow:auto; max-height:380px; }
+    .caption { margin-top:8px; color:var(--muted); font-size:0.9rem; }
+    .callout { border-left:4px solid var(--accent); padding:10px 0 10px 14px; color:var(--muted); margin:8px 0 0; }
+    .link-bank { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+    .link-bank a { display:inline-flex; align-items:center; gap:6px; padding:10px 12px; border-radius:999px; background:rgba(255,255,255,0.88); border:1px solid rgba(31,41,51,0.08); box-shadow:0 8px 18px rgba(51,41,28,0.05); }
+    table { width:100%; border-collapse:collapse; font-size:0.9rem; }
+    th,td { text-align:left; padding:10px 10px; border-bottom:1px solid rgba(31,41,51,0.08); vertical-align:top; }
+    th { color:var(--muted); font-size:0.76rem; text-transform:uppercase; letter-spacing:0.08em; }
+    .foot { color:var(--muted); font-size:0.88rem; margin-top:16px; }
+    .mono { font-family:"SFMono-Regular", Menlo, Consolas, monospace; font-size:0.92em; }
+    @media (max-width: 1120px) {
+      .shell { grid-template-columns:1fr; }
+      .nav { position:relative; height:auto; border-right:none; border-bottom:1px solid rgba(143,59,47,0.14); }
+      main { padding:16px; }
+      .grid-2,.grid-3,.grid-4,.pipeline,.metric-row { grid-template-columns:1fr; }
+      section.slide { min-height:auto; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside class="nav">
+    <h1>Pediatric Stent Pipeline</h1>
+    <div class="sub">Detailed, artifact-grounded walkthrough of the repo as it exists on March 18, 2026.</div>
+    <div class="chip-row">
+      <span class="chip confirmed">confirmed assets</span>
+      <span class="chip inferred">clearly inferred</span>
+      <span class="chip implemented">implemented in code</span>
+    </div>
+    <ol>
+      <li><a class="step-link" href="#slide-01"><span class="step-num">01</span>Overview</a></li>
+      <li><a class="step-link" href="#slide-02"><span class="step-num">02</span>Workflow map</a></li>
+      <li><a class="step-link" href="#slide-03"><span class="step-num">03</span>Campaign strata</a></li>
+      <li><a class="step-link" href="#slide-04"><span class="step-num">04</span>Manifest anatomy</a></li>
+      <li><a class="step-link" href="#slide-05"><span class="step-num">05</span>Normalized frame</a></li>
+      <li><a class="step-link" href="#slide-06"><span class="step-num">06</span>STEP evidence</a></li>
+      <li><a class="step-link" href="#slide-07"><span class="step-num">07</span>Geometry walk-through</a></li>
+      <li><a class="step-link" href="#slide-08"><span class="step-num">08</span>Hole labels</a></li>
+      <li><a class="step-link" href="#slide-09"><span class="step-num">09</span>Axial ordering</a></li>
+      <li><a class="step-link" href="#slide-10"><span class="step-num">10</span>Measurement package</a></li>
+      <li><a class="step-link" href="#slide-11"><span class="step-num">11</span>Hole-cap features</a></li>
+      <li><a class="step-link" href="#slide-12"><span class="step-num">12</span>Partition + unroof</a></li>
+      <li><a class="step-link" href="#slide-13"><span class="step-num">13</span>Pressure refs</a></li>
+      <li><a class="step-link" href="#slide-14"><span class="step-num">14</span>COMSOL method</a></li>
+      <li><a class="step-link" href="#slide-15"><span class="step-num">15</span>Smoke test path</a></li>
+      <li><a class="step-link" href="#slide-16"><span class="step-num">16</span>Scalar outputs</a></li>
+      <li><a class="step-link" href="#slide-17"><span class="step-num">17</span>Feature outputs</a></li>
+      <li><a class="step-link" href="#slide-18"><span class="step-num">18</span>Postprocessing</a></li>
+      <li><a class="step-link" href="#slide-19"><span class="step-num">19</span>Optimization loop</a></li>
+      <li><a class="step-link" href="#slide-20"><span class="step-num">20</span>Asset manifest</a></li>
+      <li><a class="step-link" href="#slide-21"><span class="step-num">21</span>Shot list</a></li>
+      <li><a class="step-link" href="#slide-22"><span class="step-num">22</span>Build notes</a></li>
+    </ol>
+  </aside>
+  <main>
+    <section class="slide" id="slide-01"><div class="slide-inner"><div class="eyebrow">Slide 01</div><h2>This project is best explained as a chain of engineering evidence.</h2><div class="lede">The repo already contains enough material to tell a credible end-to-end story without hand-waving. The strongest presentation version is not “look at our idea.” It is “follow this exact design from manifest row to STEP export to sidecars to COMSOL extraction contract to campaign tables.” The detailed walkthrough below uses <span class="mono">design_0000</span> and the current two-length campaign structure as the narrative backbone.</div><div><span class="status"><span class="dot"></span>Confirmed by real files</span><span class="status inferred"><span class="dot"></span>Inferred only where code exists but visuals are thin</span></div><div class="callout">Presentation strategy: treat the baseline CAD -&gt; COMSOL -&gt; CSV path as the core proof, then place surrogate optimization as the wider loop around it.</div></div></section>
+    <section class="slide" id="slide-02"><div class="slide-inner"><div class="eyebrow">Slide 02</div><h2>The workflow map is already encoded in the repository.</h2><div class="lede">The core implemented workflow is manifest-driven and metadata-first. Geometry is not exported alone, COMSOL is not asked to rediscover measurement semantics, and postprocessing is not a spreadsheet afterthought. Those three choices are what make the pipeline presentation-ready.</div><div class="pipeline"><div class="stage"><div class="n">Stage 1</div><h3>Campaign definition</h3><p>Sample design parameters, lock campaign-level fixed overrides, and emit manifest rows.</p><div class="mini"><span class="mono">run_optimization_campaign.py</span></div></div><div class="stage"><div class="n">Stage 2</div><h3>CAD export</h3><p>Generate normalized STEP geometry and sidecars in one pass.</p><div class="mini"><span class="mono">.step</span>, <span class="mono">.holes.json</span>, <span class="mono">.meters.json</span></div></div><div class="stage"><div class="n">Stage 3</div><h3>Template solve</h3><p>Import one design into a fixed-length COMSOL baseline template and solve stationary flow.</p><div class="mini">Current manual-once-per-length template strategy</div></div><div class="stage"><div class="n">Stage 4</div><h3>Extraction layer</h3><p>Build COMSOL cut planes and derived values from measurement metadata.</p><div class="mini"><span class="mono">BuildFluxExtractionLayer</span></div></div><div class="stage"><div class="n">Stage 5</div><h3>Feature + scalar CSVs</h3><p>Write a long-form feature table and a one-row-per-snapshot scalar table.</p><div class="mini">Canonical Tier-1 raw outputs</div></div><div class="stage"><div class="n">Stage 6</div><h3>Campaign tables</h3><p>Collect, summarize, merge, and expose metrics for surrogate training.</p><div class="mini"><span class="mono">campaign_flux_summary.csv</span> and <span class="mono">results.csv</span></div></div></div><div class="link-bank"><a href="../pipeline_overview.md">Pipeline overview doc</a><a href="../../scripts/run_optimization_campaign.py">Campaign generator</a><a href="../../docs/comsol_flux_extraction.md">Extraction framework note</a></div></div></section>
+    <section class="slide" id="slide-03"><div class="slide-inner"><div class="eyebrow">Slide 03</div><h2>The hardened baseline currently starts with two fixed-length campaigns.</h2><div class="grid-2"><div class="card"><h3>What is confirmed</h3><p>The repo no longer treats <span class="mono">stent_length</span> as a continuously sampled variable for the hardened baseline. Instead, it supports separate campaigns such as <span class="mono">campaign_len140</span> and <span class="mono">campaign_len220</span>, each generated with a fixed-parameter override.</p><div class="metric-row"><div class="metric"><div class="k">Current strata</div><div class="v">2</div><div class="note">140 mm and 220 mm</div></div><div class="metric"><div class="k">Sample batch size</div><div class="v">60</div><div class="note">rows in sample len220 manifest</div></div><div class="metric"><div class="k">Template model</div><div class="v">1 / length</div><div class="note">manual once, automated afterward</div></div><div class="metric"><div class="k">Story value</div><div class="v">High</div><div class="note">makes the workflow concrete and defensible</div></div></div><div class="callout">This is a great narrative choice because it ties the project to two real, repeatable template molds rather than an overly open-ended geometry story.</div><div class="link-bank"><a href="../../data/campaigns/campaign_len140/batch_0000.csv">Open 140 mm manifest</a><a href="../../data/campaigns/campaign_len220/batch_0000.csv">Open 220 mm manifest</a><a href="../comsol_batch_runbook.md">Batch runbook</a></div></div><div class="card"><h3>Presentation treatment</h3><p>Use a small comparison panel showing the two campaign names, the two length values, and the fact that the rest of the parameter space is sampled within each stratum. This keeps the audience from thinking "every run changes everything at once."</p><p>The best supporting visual is not a plot yet. It is a clean manifest excerpt plus one geometry per length.</p></div></div></div></section>
+    <section class="slide" id="slide-04"><div class="slide-inner"><div class="eyebrow">Slide 04</div><h2>The manifest row is the first object that already knows the future file paths.</h2><div class="grid-2"><div class="card"><h3>Sample row anatomy</h3><p>For <span class="mono">campaign_len220/design_0000</span>, the batch manifest already carries the design ID, requested counts, CAD path, simulation contract version, and sidecar expectations. That means the pipeline is deterministic before COMSOL ever opens.</p><pre>design_id = design_0000
+stent_length = 220.0
+requested_n_prox = 7
+requested_n_mid = 3
+requested_n_dist = 2
+requested_total_hole_count = 18
+cad_file = .../campaign_len220/cad/design_0000.step
+sim_contract_version = v1_deltaP490_steady_laminar
+domain_template = triple_domain_dumbbell
+selection_strategy = coordinate_bbox</pre><div class="caption">Confirmed from <span class="mono">data/campaigns/campaign_len220/batch_0000.csv</span>.</div></div><div class="card"><h3>Why this page matters</h3><p>It teaches the audience that this is not a GUI-only modeling workflow. A design begins life as a row in a campaign table, and every downstream file is attached to that row. That is the first sign that the project is automation-ready.</p></div></div></div></section>
+    <section class="slide" id="slide-05"><div class="slide-inner"><div class="eyebrow">Slide 05</div><h2>The normalized export frame is the backbone of everything that follows.</h2><div class="grid-2"><div><img class="thumb" src="../images/geometry_schematic.png" alt="Geometry schematic"><div class="caption">Existing project graphic. Useful for orienting the audience before the more exact frame contract.</div></div><div class="card"><h3>Current frame contract</h3><p>According to <span class="mono">comsol_normalized_frame_reference.md</span>, the exported stent axis is aligned to global <span class="mono">+x</span>, the straight body starts at <span class="mono">x = 0</span>, and the body centerline is centered at <span class="mono">y = 0</span>, <span class="mono">z = 0</span>. The proximal coil is allowed to extend into negative x.</p><pre>body axis = +X
+body start = x = 0
+body centerline = y = 0, z = 0
+proximal coil may extend to x < 0</pre><div class="callout">This is why axial ordering in the hole sidecar, the distal partition placement, and later flux-vs-axis charts can all use the same coordinate system.</div><div class="link-bank"><a href="../comsol_normalized_frame_reference.md">Normalized frame reference</a></div></div></div></div></section>
+    <section class="slide" id="slide-06"><div class="slide-inner"><div class="eyebrow">Slide 06</div><h2>Use the STEP file as the geometric anchor, even when the browser cannot render STEP directly.</h2><div class="grid-2"><div class="card"><h3>Confirmed files</h3><p>The sample geometry exists as real STEP files for both lengths:</p><pre>data/campaigns/campaign_len140/cad/design_0000.step
+data/campaigns/campaign_len220/cad/design_0000.step</pre><p>Those files are the actual exports used to build the baseline workflow. They should be treated as the reference solids for any later COMSOL or viewer capture.</p><div class="link-bank"><a href="../../data/campaigns/campaign_len140/cad/design_0000.step">Open 140 mm STEP</a><a href="../../data/campaigns/campaign_len220/cad/design_0000.step">Open 220 mm STEP</a></div></div><div class="card"><h3>Exact presentation shot instruction</h3><p>If you want a still from the STEP rather than the HTML viewer, the ideal capture is an oblique front-right view with:</p><pre>Visible:
+- full straight shaft
+- proximal coil
+- distal coil
+- one-wall side holes readable as notches/openings
+
+Hide or mute:
+- giant coordinate axes
+- background clutter
+- measurement overlays for this shot</pre><p>This page should make it clear that the geometry itself is real and exportable, even if STEP is not a browser-native format.</p></div></div></div></section>
+    <section class="slide" id="slide-07"><div class="slide-inner"><div class="eyebrow">Slide 07</div><h2>The live geometry viewer is useful, but it should support the story rather than carry it.</h2><div class="grid-2"><div class="card"><h3>What the viewer is for</h3><p>The generated viewer is a post-analysis artifact used to check whether exported hole centers, normals, and measurement features make sense relative to the stent mesh. It is strongest as a supporting visual, not as the only geometry evidence.</p><div class="link-bank"><a href="../../data/campaigns/campaign_len220/cad/viewer/design_0000_all_holes_viewer.html">Open len220 viewer</a><a href="../../data/campaigns/campaign_len140/cad/viewer/design_0000_all_holes_viewer.html">Open len140 viewer</a><a href="../hole_metadata_viewer.md">Viewer documentation</a></div></div><div class="card"><h3>Important honesty note</h3><p>The viewer is real, but its current UI affordances are less reliable as presentation anchors than the sidecar content itself. For the deck, use the viewer as an external linked demo and use labeled sidecar excerpts inside the main pages.</p></div></div></div></section>
+    <section class="slide" id="slide-08"><div class="slide-inner"><div class="eyebrow">Slide 08</div><h2>The hole sidecar is where the geometry becomes a list of labeled objects.</h2><div class="grid-2"><div class="card"><h3>Confirmed sidecar fields</h3><p>The hole sidecar contains per-hole labels and geometry descriptors such as:</p><pre>hole_id
+region
+type
+center_mm
+radius_mm
+normal
+axial_x_mm
+axial_rank</pre><p>This is the right page to explain that the project no longer depends on COMSOL or postprocessors guessing where holes are.</p><div class="link-bank"><a href="../../data/campaigns/campaign_len220/cad/design_0000.holes.json">Open len220 hole sidecar</a><a href="../hole_metadata_sidecar_spec.md">Hole sidecar spec</a></div></div><div class="card"><h3>First few real labels</h3><pre>coil_prox_000   coil  prox  x=-5.25085
+coil_prox_002   coil  prox  x=-4.543554
+shaft_prox_000  shaft prox  x=1.0
+shaft_prox_001  shaft prox  x=4.600516
+coil_prox_001   coil  prox  x=5.218128
+shaft_prox_002  shaft prox  x=8.201032
+shaft_prox_003  shaft prox  x=11.801548
+shaft_prox_004  shaft prox  x=15.402065</pre><div class="caption">Confirmed from the current <span class="mono">design_0000.holes.json</span>.</div></div></div></div></section>
+    <section class="slide" id="slide-09"><div class="slide-inner"><div class="eyebrow">Slide 09</div><h2>Axial ordering is the bridge from geometry to interpretable plots.</h2><div class="grid-2"><div class="card"><h3>What the ordering enables</h3><p>Every hole carries an <span class="mono">axial_x_mm</span> and an <span class="mono">axial_rank</span>. That decision means future charts can treat the stent itself as the x-axis and place hole exchange values at reproducible locations.</p><p>Without this field, per-hole flux becomes a bag of values. With it, the same data can become a proximal-to-distal exchange profile.</p></div><div class="card"><h3>Presentation use</h3><p>This is the right page to preview the future per-hole flux plot, even if the actual production chart is still pending COMSOL smoke testing. Show the ordering rule now, then show the eventual plot later when available.</p></div></div></div></section>
+    <section class="slide" id="slide-10"><div class="slide-inner"><div class="eyebrow">Slide 10</div><h2>The measurement sidecar is the extraction package that COMSOL reads.</h2><div class="grid-2"><div class="card"><h3>Feature inventory for the current sample</h3><div class="metric-row"><div class="metric"><div class="k">Hole caps</div><div class="v">18</div><div class="note">one for every hole in the sample design</div></div><div class="metric"><div class="k">Cross-sections</div><div class="v">2</div><div class="note">distal lumen and annulus</div></div><div class="metric"><div class="k">Pressure refs</div><div class="v">2</div><div class="note">inlet and outlet named selections</div></div><div class="metric"><div class="k">Unroof patches</div><div class="v">1</div><div class="note">current sample has one distal unroof patch</div></div></div><p>The measurement sidecar is the scientific contract for the COMSOL extraction layer: it tells COMSOL what to measure, where to center the measurements, what sign convention to use, and how features group by zone.</p><div class="link-bank"><a href="../../data/campaigns/campaign_len220/cad/design_0000.meters.json">Open measurement sidecar</a><a href="../../src/measurement_surfaces/schema.py">Validation schema</a></div></div><div class="card"><h3>Feature-class counts confirmed from JSON</h3><pre>hole_cap      = 18
+cross_section = 2
+pressure_ref  = 2
+unroof_patch  = 1</pre><p>The sidecar also carries:</p><pre>analysis_support.hole_cap_ids_by_zone
+analysis_support.unroof_patch_ids
+analysis_support.feature_ids
+analysis_support.distal_partition_window
+validation.generator_warnings</pre></div></div></div></section>
+    <section class="slide" id="slide-11"><div class="slide-inner"><div class="eyebrow">Slide 11</div><h2>Hole-cap features are the key shift from “holes exist” to “holes are measurable.”</h2><div class="grid-2"><div class="card"><h3>Feature naming contract</h3><p>The measurement sidecar wraps each hole as a named extraction surface with a stable feature ID:</p><pre>cap_hole_coil_prox_000
+cap_hole_coil_prox_002
+cap_hole_shaft_prox_000
+cap_hole_shaft_prox_001
+...
+cap_hole_shaft_mid_000
+cap_hole_shaft_dist_001</pre><p>Those labels are much more useful in a talk than unnamed “small disks,” because they show exactly how per-hole geometry becomes per-feature extraction.</p></div><div class="card"><h3>Example feature object</h3><pre>{
+  "feature_id": "cap_hole_coil_prox_000",
+  "feature_class": "hole_cap",
+  "zone": "prox",
+  "geometry_type": "cutplane_disk",
+  "center_mm": [-5.25085, 3.774922, 4.982901],
+  "normal": [-0.698317792, 0.331555752, -0.634368225],
+  "radius_mm": 0.342153,
+  "parent_feature": "coil_prox_000",
+  "source_type": "coil"
+}</pre></div></div><div class="callout">This is also the strongest place to explain that legacy grouped prox/mid/dist outputs are not the real geometry truth anymore. They are now interpretations over a richer per-feature layer.</div></div></section>
+    <section class="slide" id="slide-12"><div class="slide-inner"><div class="eyebrow">Slide 12</div><h2>The distal lumen, distal annulus, and unroof patch are the most structurally important non-hole features.</h2><div class="grid-2"><div class="card"><h3>Why these features matter</h3><p>The project is not only measuring hole exchange. It is also trying to separate distal lumen flow from distal annulus flow and to measure exchange through the unroof region. That means the measurement package must define more than just one cap per hole.</p><pre>sec_distal_lumen
+sec_distal_annulus
+patch_unroof_1</pre><p>The current generator now explicitly places the distal partition plane upstream of the unroof, closing a major ambiguity that existed before.</p></div><div class="card"><h3>Current safety window</h3><pre>safe_min_x_mm = 186.806247
+safe_max_x_mm = 205.741731
+selected_x_mm = 205.741731</pre><p>This comes directly from the current len220 <span class="mono">design_0000.meters.json</span>.</p><div class="link-bank"><a href="../comsol_flux_extraction.md">Extraction note</a><a href="../../src/cad/stent_generator.py">Generator implementation</a></div></div></div></div></section>
+    <section class="slide" id="slide-13"><div class="slide-inner"><div class="eyebrow">Slide 13</div><h2>Pressure references are simple, but they tie the new extraction path back to the existing baseline template.</h2><div class="grid-2"><div class="card"><h3>Pressure-ref features</h3><p>The measurement package includes two named-selection features:</p><pre>sec_inlet_ref  -> selection_tag = inlet
+sec_outlet_ref -> selection_tag = outlet</pre><p>That choice is pragmatic. It lets the metadata-driven extraction layer reuse the stable parts of the baseline COMSOL template without pretending every measurement needs to be rebuilt from scratch.</p></div><div class="card"><h3>How to explain this</h3><p>Tell the audience that the pipeline is strict where it needs to be strict and conservative where it makes sense. Hole caps, the unroof patch, and the distal partition are geometry-defined. Inlet and outlet are existing template references, because they are already stable and meaningful.</p></div></div></div></section>
+    <section class="slide" id="slide-14"><div class="slide-inner"><div class="eyebrow">Slide 14</div><h2>The COMSOL extraction method consumes the sidecar directly and writes two CSV contracts.</h2><div class="grid-2"><div class="card"><h3>Method inputs and outputs</h3><pre>// METHOD INPUTS
+measurement_metadata_path
+design_id
+
+// OUTPUTS
+<design_id>_flux_scalars.csv
+<design_id>_flux_features.csv</pre><p>The method reads the measurement sidecar, scans the feature list, creates COMSOL datasets and numericals, and writes the extracted values back to disk.</p><div class="link-bank"><a href="../../src/comsol/java/BuildFluxExtractionLayer.java.txt">Open method source</a></div></div><div class="card"><h3>Core expressions</h3><pre>FLOW_EXPR     = 6e7*(u*nx+v*ny+w*nz)
+FLOW_ABS_EXPR = 6e7*abs(u*nx+v*ny+w*nz)
+VEL_MAG_EXPR  = sqrt(u^2+v^2+w^2)</pre><p>This is the point in the talk where you can explicitly connect the metadata surfaces to signed and absolute volumetric exchange flux.</p></div></div></div></section>
+    <section class="slide" id="slide-15"><div class="slide-inner"><div class="eyebrow">Slide 15</div><h2>The first runtime goal is a one-design desktop smoke test, not immediate batch heroics.</h2><div class="grid-2"><div class="card"><h3>Current recommended order</h3><pre>1. Open length-matched baseline .mph copy
+2. Enable file-system access in COMSOL
+3. Add BuildFluxExtractionLayer method
+4. Create Method Call node
+5. Supply measurement_metadata_path and design_id
+6. Solve baseline model
+7. Run Method Call
+8. Inspect CP_flux_* and DV_flux_*
+9. Confirm flux CSVs were written</pre><div class="link-bank"><a href="../comsol_smoke_run_checklist.md">Smoke test checklist</a></div></div><div class="card"><h3>Why this page belongs in the presentation</h3><p>It signals that the project is engineering-hardened rather than magical. There is a deliberate validation ladder: one design first, then a small repeatability check, then campaign-scale automation.</p></div></div></div></section>
+    <section class="slide" id="slide-16"><div class="slide-inner"><div class="eyebrow">Slide 16</div><h2>The scalar output table is where physics becomes a concise design summary.</h2><div class="grid-2"><div class="card"><h3>Core scalar families</h3><pre>Q_out_ml_min
+deltaP_Pa
+conductance_ml_min_per_Pa
+Q_lumen_out_ml_min
+Q_annulus_out_ml_min
+frac_lumen_out
+frac_annulus_out
+Q_holes_net_ml_min
+Q_holes_abs_ml_min
+Q_unroof_net_ml_min
+Q_unroof_abs_ml_min
+exchange_number
+hole_only_exchange_number
+net_direction_index</pre><p>These are the design-level quantities that let the project talk about throughput, resistance, pathway partition, and total exchange in one table.</p></div><div class="card"><h3>Why this is presentation-worthy</h3><p>This is the moment to show that the pipeline is not just capturing pretty fields. It is compressing the solved flow into a coherent set of physically interpretable metrics that can be compared across designs.</p></div></div></div></section>
+    <section class="slide" id="slide-17"><div class="slide-inner"><div class="eyebrow">Slide 17</div><h2>The feature CSV preserves the high-resolution truth that the scalar table necessarily compresses.</h2><div class="grid-2"><div class="card"><h3>Feature-level structure</h3><p>The long-form feature output is where one row corresponds to one measurement feature. That means hole caps, unroof patches, and partition sections can all coexist in one table.</p><pre>design_id
+feature_id
+feature_class
+zone
+signed_flux_ml_min
+abs_flux_ml_min
+active_flag
+p_ramp
+...</pre><p>This table is the real bridge from geometry labels to later per-feature science plots.</p></div><div class="card"><h3>What is still missing visually</h3><p>The next presentation-quality artifact should be a real chart built from <span class="mono">design_0000_flux_features.csv</span> after the smoke test: absolute flux vs axial position, color-coded by zone or feature class.</p></div></div></div></section>
+    <section class="slide" id="slide-18"><div class="slide-inner"><div class="eyebrow">Slide 18</div><h2>Postprocessing is a controlled promotion from feature truth to training-ready columns.</h2><div class="grid-2"><div class="card"><h3>Collection path</h3><pre>design_XXXX_flux_scalars.csv
+design_XXXX_flux_features.csv
+  -> collect_flux_extraction_results.py
+  -> campaign_flux_summary.csv
+  -> campaign_flux_features.csv
+  -> merge_tier1_run_results.py
+  -> results.csv</pre><p>This is where per-design outputs become campaign-wide tables, and where Tier-1 metrics are merged back into the training results set.</p><div class="link-bank"><a href="../../scripts/collect_flux_extraction_results.py">Collect script</a><a href="../../scripts/merge_tier1_run_results.py">Merge script</a></div></div><div class="card"><h3>Current merge hardening</h3><p>The merge script now fails loudly on duplicate design IDs, only merges a Tier-1 whitelist, and avoids wiping existing values when incoming rows are partial. That makes the postprocessing path a lot safer for pilot runs.</p></div></div></div></section>
+    <section class="slide" id="slide-19"><div class="slide-inner"><div class="eyebrow">Slide 19</div><h2>The optimization loop exists, but it should be introduced as the outer loop around the baseline evidence chain.</h2><div class="grid-2"><div class="card"><h3>Confirmed by code</h3><p><span class="mono">run_optimization_campaign.py</span> already frames an active learning process: train the surrogate, suggest new candidates, generate CAD, and prepare more COMSOL work. The repo also documents primary optimization metrics such as DeltaP, Q_out, exchange number, normalized centroid, and normalized IQS.</p><div class="link-bank"><a href="../../scripts/run_optimization_campaign.py">Optimization orchestration</a><a href="../metrics_catalog.md">Metrics catalog</a></div></div><div class="card"><h3>How to present it well</h3><p>Do not make this the opening chapter. Let the audience first trust the baseline extraction path, then show that the surrogate loop consumes those validated outputs rather than replacing them.</p></div></div></div></section>
+    <section class="slide" id="slide-20"><div class="slide-inner"><div class="eyebrow">Slide 20</div><h2>Asset manifest for the detailed version of the talk.</h2><div class="card"><table><thead><tr><th>Asset</th><th>Path</th><th>Use</th><th>Confidence</th></tr></thead><tbody><tr><td>Geometry schematic</td><td class="mono">docs/images/geometry_schematic.png</td><td>Early geometry orientation</td><td>High</td></tr><tr><td>220 mm STEP</td><td class="mono">data/campaigns/campaign_len220/cad/design_0000.step</td><td>Main sample geometry</td><td>High</td></tr><tr><td>220 mm hole sidecar</td><td class="mono">data/campaigns/campaign_len220/cad/design_0000.holes.json</td><td>Hole labels and normals</td><td>High</td></tr><tr><td>220 mm measurement sidecar</td><td class="mono">data/campaigns/campaign_len220/cad/design_0000.meters.json</td><td>Extraction contract</td><td>High</td></tr><tr><td>220 mm viewer</td><td class="mono">data/campaigns/campaign_len220/cad/viewer/design_0000_all_holes_viewer.html</td><td>External live demo</td><td>High</td></tr><tr><td>Batch manifest</td><td class="mono">data/campaigns/campaign_len220/batch_0000.csv</td><td>Campaign stage proof</td><td>High</td></tr><tr><td>COMSOL method source</td><td class="mono">src/comsol/java/BuildFluxExtractionLayer.java.txt</td><td>Extraction logic proof</td><td>High</td></tr><tr><td>Test flux summary</td><td class="mono">data/campaigns/campaign_test/campaign_flux_summary.csv</td><td>Summary table shape</td><td>Medium</td></tr><tr><td>Test merged results</td><td class="mono">data/campaigns/campaign_test/results.csv</td><td>Training-table shape</td><td>Medium</td></tr></tbody></table></div></div></section>
+    <section class="slide" id="slide-21"><div class="slide-inner"><div class="eyebrow">Slide 21</div><h2>Precise missing-asset shot list for the strongest final version.</h2><div class="grid-2"><div class="shot"><strong>COMSOL extraction-tree screenshot</strong>Capture the solved baseline model after running <span class="mono">BuildFluxExtractionLayer</span> with <span class="mono">CP_flux_*</span> and <span class="mono">DV_flux_*</span> nodes visible. This is the missing proof shot for Slide 14 or 15.</div><div class="shot"><strong>Partition vs unroof geometry overlay</strong>Capture one oblique geometry view showing <span class="mono">patch_unroof_1</span>, <span class="mono">sec_distal_lumen</span>, and <span class="mono">sec_distal_annulus</span> together. This supports Slide 12.</div><div class="shot"><strong>Per-hole axial flux plot</strong>Once <span class="mono">design_0000_flux_features.csv</span> exists, generate a scatter or lollipop chart of <span class="mono">abs_flux_ml_min</span> vs <span class="mono">axial_x_mm</span>. This supports Slides 09 and 17.</div><div class="shot"><strong>Results merge comparison</strong>Make a side-by-side crop showing the same row before and after Tier-1 merge. This supports Slide 18.</div></div></div></section>
+    <section class="slide" id="slide-22"><div class="slide-inner"><div class="eyebrow">Slide 22</div><h2>This HTML is now a full long-form build scaffold, not just a note dump.</h2><div class="grid-2"><div class="card"><h3>What changed in this expanded version</h3><p>The deck now explicitly uses the sample STEP files, the actual hole and feature labels from <span class="mono">design_0000</span>, the normalized frame reference, the current smoke-test and batch runbook logic, and a much longer page-by-page explanation of the baseline path.</p><p>It is no longer trying to compress the story into a short executive summary. It is closer to a thesis walkthrough or technical defense appendix.</p></div><div class="card"><h3>Next best upgrade</h3><p>After your first real COMSOL smoke test, the single highest-value improvement is to drop in:</p><pre>1. one COMSOL tree screenshot
+2. one real feature-level flux plot
+3. one merged Tier-1 results comparison</pre><div class="foot">Built at <span class="mono">docs/pipeline_presentation/index.html</span>.</div></div></div></div></section>
+  </main>
+</div>
+<script>
+(function(){
+  const sections = Array.from(document.querySelectorAll('section.slide'));
+  const links = Array.from(document.querySelectorAll('.step-link'));
+  const byId = new Map(links.map((link)=>[link.getAttribute('href').slice(1), link]));
+  const observer = new IntersectionObserver((entries)=>{
+    entries.forEach((entry)=>{
+      const link = byId.get(entry.target.id);
+      if (!link) return;
+      if (entry.isIntersecting) {
+        links.forEach((node)=>node.classList.remove('active'));
+        link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-35% 0px -45% 0px', threshold: 0.15 });
+  sections.forEach((section)=>observer.observe(section));
+}());
+</script>
+</body>
+</html>

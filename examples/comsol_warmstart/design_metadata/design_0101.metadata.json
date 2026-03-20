@@ -1,0 +1,16 @@
+{
+  "design_id": "design_0101",
+  "template_id": "len220",
+  "family_label": "baselineA",
+  "topology_label": "shaft_prox_dense",
+  "stent_length_mm": 212.0,
+  "hole_count_total": 21,
+  "hole_diameter_mm": 0.47,
+  "unroof_fraction": 0.24,
+  "prox_hole_count": 7,
+  "mid_hole_count": 7,
+  "dist_hole_count": 7,
+  "measurement_metadata_path": "C:/akashcomsoltest/inputs/design_0101/design_0101.meters.json",
+  "holes_path": "C:/akashcomsoltest/inputs/design_0101/design_0101.holes.json",
+  "step_path": "C:/akashcomsoltest/inputs/design_0101/design_0101.step"
+}

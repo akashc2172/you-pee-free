@@ -1,0 +1,74 @@
+normalized_frame:
+  shaft_axis: "+x"
+  body_start_x_mm: 0.0
+  body_center_y_mm: 0.0
+  body_center_z_mm: 0.0
+  notes:
+    - "The exported STEP uses the generator-normalized solid directly."
+    - "The straight body shaft starts at x = 0 mm."
+    - "The straight body centerline is centered at y = 0 mm and z = 0 mm."
+    - "The proximal coil may extend into negative x."
+
+dumbbell_dimensions_mm:
+  kidney_reservoir_radius_mm: 18.0
+  kidney_reservoir_length_mm: 31.0
+  ureter_tube_radius_mm: 4.0
+  ureter_tube_length_rule: "span from export_body_start_x to export_body_end_x"
+  bladder_reservoir_radius_mm: 18.0
+  bladder_reservoir_length_mm: 31.0
+
+manual_validated_template_mm:
+  notes:
+    - "These values reflect the current manually validated COMSOL template geometry."
+    - "Treat them as the current ground-truth template placements unless replaced by a programmatic generator."
+    - "Template construction is manual once per length/template; batch execution is automated after the template exists."
+  cylinders:
+    kidney:
+      x_mm: -25.0
+      y_mm: 0.0
+      z_mm: 0.0
+      radius_mm: 18.0
+      height_mm: 31.0
+    ureter:
+      x_mm: 0.0
+      y_mm: 0.0
+      z_mm: 0.0
+      radius_mm: 4.0
+      height_rule: "align to export_body_end_x - export_body_start_x"
+    bladder:
+      x_mm: 264.0
+      y_mm: 0.0
+      z_mm: 0.0
+      radius_mm: 18.0
+      height_mm: 31.0
+
+placement_rules:
+  template_mode: "manual_validated_current"
+  kidney_reservoir_start_x_rule: "manual fixed x = -25 mm"
+  ureter_tube_start_x_rule: "manual fixed x = 0 mm"
+  bladder_reservoir_start_x_rule: "manual fixed x = 264 mm"
+  center_y_rule: "manual fixed y = 0 mm"
+  center_z_rule: "manual fixed z = 0 mm"
+  notes:
+    - "Build all three cylinders along the global x-axis."
+    - "The kidney and bladder reservoir placements are the current manually validated values, not earlier idealized helper estimates."
+    - "The ureter tube remains aligned to the straight shaft centerline."
+
+selection_boxes_mm:
+  inlet_cap_thickness_mm: 1.0
+  outlet_cap_thickness_mm: 1.0
+  coil_zone_yz_half_width_mm: 18.0
+  mid_zone_yz_half_width_mm: 4.0
+  mid_zone_start_fraction: 0.25
+  mid_zone_end_fraction: 0.75
+  manual_validated_caps:
+    inlet_x_range_mm: [-25.5, -24.5]
+    outlet_x_range_mm: [294.5, 295.5]
+    inlet_y_range_mm: [-18.0, 18.0]
+    inlet_z_range_mm: [-18.0, 18.0]
+    outlet_y_range_mm: [-18.0, 18.0]
+    outlet_z_range_mm: [-18.0, 18.0]
+  notes:
+    - "Use the manual inlet/outlet cap boxes for the current validated template."
+    - "Create coil_zone as the union of the proximal-coil x span [export_bbox_min_x, export_body_start_x] and the distal-coil x span [export_body_end_x, export_bbox_max_x]."
+    - "Create mid_zone on the straight shaft using the configured body-length fractions."
